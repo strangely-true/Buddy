@@ -23,64 +23,75 @@ app.use(express.json());
 // Store active sessions
 const sessions = new Map();
 
-// AI Agents configuration with unique voices
+// AI Agents configuration with unique voices and distinct personalities
 const agents = [
   {
     id: 'chen',
     name: 'Dr. Sarah Chen',
     role: 'Research Analyst',
-    personality: 'analytical, methodical, data-driven',
-    expertise: 'research methodology, data analysis, scientific approach',
-    voiceId: 'EXAVITQu4vr4xnSDxMaL' // Bella - professional female voice
+    personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
+    expertise: 'research methodology, data analysis, statistical significance, peer review standards',
+    voiceId: 'EXAVITQu4vr4xnSDxMaL', // Bella - professional female voice
+    style: 'analytical and precise, focuses on empirical evidence and research rigor'
   },
   {
     id: 'thompson',
     name: 'Marcus Thompson',
     role: 'Strategy Expert',
-    personality: 'strategic, decisive, business-focused',
-    expertise: 'business strategy, market analysis, competitive intelligence',
-    voiceId: 'pNInz6obpgDQGcFmaJgB' // Adam - confident male voice
+    personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
+    expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment',
+    voiceId: 'pNInz6obpgDQGcFmaJgB', // Adam - confident male voice
+    style: 'direct and business-focused, evaluates practical applications and market viability'
   },
   {
     id: 'rodriguez',
     name: 'Prof. Elena Rodriguez',
     role: 'Domain Specialist',
-    personality: 'academic, thorough, theoretical',
-    expertise: 'theoretical frameworks, academic research, conceptual analysis',
-    voiceId: 'XB0fDUnXU5powFXDhCwa' // Charlotte - academic female voice
+    personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
+    expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections',
+    voiceId: 'XB0fDUnXU5powFXDhCwa', // Charlotte - academic female voice
+    style: 'scholarly and thorough, connects concepts to broader theoretical frameworks'
   },
   {
     id: 'kim',
     name: 'Alex Kim',
     role: 'Innovation Lead',
-    personality: 'creative, forward-thinking, disruptive',
-    expertise: 'innovation, emerging technologies, future trends',
-    voiceId: 'onwK4e9ZLuTAKqWW03F9' // Daniel - energetic male voice
+    personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
+    expertise: 'emerging technologies, future trends, disruptive innovation, technological implications',
+    voiceId: 'onwK4e9ZLuTAKqWW03F9', // Daniel - energetic male voice
+    style: 'visionary and provocative, explores cutting-edge possibilities and future implications'
   }
 ];
 
-// Generate AI response
+// Generate AI response with enhanced personality and focus
 async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null) {
   const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
   const agent = agents.find(a => a.id === agentId);
   
   if (!agent) throw new Error('Agent not found');
 
-  const conversationContext = conversationHistory.slice(-10).join('\n');
+  const conversationContext = conversationHistory.slice(-8).join('\n');
   
-  const prompt = `You are ${agent.name}, a ${agent.role} with expertise in ${agent.expertise}. 
-Your personality is ${agent.personality}.
+  const prompt = `You are ${agent.name}, a ${agent.role}. Your personality: ${agent.personality}
+Your expertise: ${agent.expertise}
+Your discussion style: ${agent.style}
 
-Current discussion topic: ${context}
+CRITICAL INSTRUCTIONS:
+- Stay STRICTLY within the topic scope defined in the context
+- Do NOT deviate to unrelated topics or general discussions
+- Build on previous points made by other experts
+- Challenge or support specific points with your expertise
+- Keep responses focused, insightful, and 2-3 sentences maximum
+- Maintain your distinct personality and perspective
 
-Recent conversation:
+Current focused discussion topic: ${context}
+
+Recent expert conversation:
 ${conversationContext}
 
-${userInput ? `A user just said: "${userInput}"` : 'Continue the discussion naturally, building on previous points or introducing new perspectives related to your expertise.'}
+${userInput ? `User question/input: "${userInput}" - Address this within the topic scope.` : 'Continue the focused discussion, building on previous expert points or introducing a new angle within the topic scope.'}
 
-Respond as ${agent.name} would, staying in character. Keep responses conversational, insightful, and 2-4 sentences. Make it engaging and natural. Build meaningfully on what others have said.
-
-Response:`;
+Respond as ${agent.name} with your unique perspective, staying strictly on topic:`;
 
   const response = await genAI.models.generateContent({
     model: "gemini-2.0-flash",
@@ -92,7 +103,6 @@ Response:`;
 
 // Generate speech using ElevenLabs with better error handling
 async function generateSpeech(text, voiceId, elevenLabsApiKey) {
-  // Return null if no API key is provided
   if (!elevenLabsApiKey || elevenLabsApiKey.trim() === '') {
     console.log('ElevenLabs API key not provided, skipping speech generation');
     return null;
@@ -105,9 +115,9 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
         text,
         model_id: 'eleven_monolingual_v1',
         voice_settings: {
-          stability: 0.6,
+          stability: 0.7,
           similarity_boost: 0.8,
-          style: 0.2,
+          style: 0.3,
           use_speaker_boost: true
         }
       },
@@ -125,29 +135,19 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
     return Buffer.from(response.data).toString('base64');
   } catch (error) {
     console.error('ElevenLabs API error:', error.response?.status, error.response?.statusText);
-    
-    // Handle specific error cases
-    if (error.response?.status === 401) {
-      console.error('ElevenLabs API authentication failed. Please check your API key.');
-    } else if (error.response?.status === 429) {
-      console.error('ElevenLabs API rate limit exceeded.');
-    } else if (error.response?.status === 400) {
-      console.error('ElevenLabs API bad request. Check your request parameters.');
-    }
-    
     return null;
   }
 }
 
-// Calculate estimated audio duration (rough estimate: ~150 words per minute)
+// Calculate estimated audio duration
 function estimateAudioDuration(text) {
   const words = text.split(' ').length;
-  const wordsPerMinute = 150;
+  const wordsPerMinute = 160; // Slightly faster for focused discussion
   const durationSeconds = (words / wordsPerMinute) * 60;
-  return Math.max(durationSeconds * 1000, 3000); // Minimum 3 seconds
+  return Math.max(durationSeconds * 1000, 2500); // Minimum 2.5 seconds
 }
 
-// Process content and start conversation
+// Process content with multimodal support
 app.post('/api/process-content', async (req, res) => {
   try {
     const { content, type, sessionId, geminiApiKey } = req.body;
@@ -158,26 +158,68 @@ app.post('/api/process-content', async (req, res) => {
 
     const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    const analysisPrompt = `Analyze the following ${type} content and extract key themes, topics, and discussion points that would be suitable for an AI conference discussion:
+    let analysisPrompt;
+    let multimodalContent = [];
 
-${content}
+    if (type === 'multimodal' && content.images && content.images.length > 0) {
+      // Handle multimodal content with images
+      analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
 
-Provide a structured analysis with:
-1. Main topics (3-5 key themes)
-2. Discussion angles (different perspectives to explore)
-3. Potential questions or debates
-4. Areas of interest for each type of expert (research, strategy, academic, innovation)
+Text content: ${content.text}
 
-Keep the analysis concise but comprehensive.`;
+For the uploaded images, analyze their content, context, and relevance to the text.
+
+Create a structured analysis for expert discussion:
+1. Core topic definition (be very specific)
+2. Key discussion points (3-4 focused areas)
+3. Expert perspectives needed (research, strategy, academic, innovation angles)
+4. Specific questions or challenges to explore
+5. Boundaries - what should NOT be discussed to maintain focus
+
+The discussion must stay strictly within this topic scope. Experts should not deviate to general or unrelated topics.`;
+
+      // Add text content
+      multimodalContent.push({ text: analysisPrompt });
+
+      // Add images
+      content.images.forEach(image => {
+        multimodalContent.push({
+          inlineData: {
+            mimeType: image.mimeType,
+            data: image.data
+          }
+        });
+      });
+    } else {
+      // Handle text-only content
+      const textContent = typeof content === 'object' ? content.text : content;
+      
+      analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
+
+${textContent}
+
+Create a structured analysis for expert discussion:
+1. Core topic definition (be very specific and focused)
+2. Key discussion points (3-4 focused areas only)
+3. Expert perspectives needed (research, strategy, academic, innovation angles)
+4. Specific questions or challenges to explore within this topic
+5. Discussion boundaries - what should NOT be discussed to maintain focus
+
+The experts must stay strictly within this topic scope and not deviate to general discussions.
+
+Keep the analysis concise but comprehensive for a focused 5-15 minute expert discussion.`;
+
+      multimodalContent = [{ text: analysisPrompt }];
+    }
 
     const response = await genAI.models.generateContent({
       model: "gemini-2.0-flash",
-      contents: analysisPrompt,
+      contents: multimodalContent,
     });
 
     const analysis = response.text;
 
-    // Store session data
+    // Store session data with enhanced configuration
     sessions.set(sessionId, {
       topic: analysis,
       conversationHistory: [],
@@ -187,8 +229,9 @@ Keep the analysis concise but comprehensive.`;
       currentSpeaker: null,
       conversationQueue: [],
       totalMessages: 0,
-      maxMessages: 25, // Limit for 5-15 minute conversation
-      nextTimeout: null
+      maxMessages: 20, // Focused discussion limit
+      nextTimeout: null,
+      topicBoundaries: analysis // Store for reference
     });
 
     res.json({ success: true, analysis });
@@ -217,11 +260,17 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Generate opening statement from Dr. Chen
+      // Generate focused opening statement from Dr. Chen
       const openingAgent = agents[0]; // Dr. Chen
-      const openingPrompt = `Based on this topic analysis: ${session.topic}
+      const openingPrompt = `Based on this focused topic analysis: ${session.topic}
 
-Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) would make to start a conference discussion. Keep it professional, insightful, and around 3-4 sentences. Set the stage for a meaningful discussion.`;
+As Dr. Sarah Chen, provide a precise opening statement that:
+1. Clearly defines the specific topic scope
+2. Sets expectations for a focused expert discussion
+3. Introduces the analytical framework you'll use
+4. Is 2-3 sentences maximum
+
+Stay strictly within the topic boundaries defined in the analysis.`;
 
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
       const response = await genAI.models.generateContent({
@@ -234,7 +283,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
       session.currentSpeaker = openingAgent.id;
       session.totalMessages++;
 
-      // Generate speech (will return null if no API key)
+      // Generate speech
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
       const audioDuration = estimateAudioDuration(message);
 
@@ -251,7 +300,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
       // Start the synchronized conversation loop
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 3000); // Wait for audio to finish + 3 second pause
+      }, audioDuration + 2000); // Reduced pause for focused discussion
 
     } catch (error) {
       console.error('Conversation start error:', error);
@@ -260,7 +309,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
   });
 
   socket.on('user-message', async (data) => {
-    const { sessionId, message, geminiApiKey, elevenLabsApiKey, isVoiceInput } = data;
+    const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
     const session = sessions.get(sessionId);
     
     if (!session) {
@@ -281,14 +330,13 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
       // Emit user message to all participants
       io.to(sessionId).emit('user-message', {
         message,
-        timestamp: new Date(),
-        isVoiceInput
+        timestamp: new Date()
       });
 
       // Wait a moment then have an agent respond
       session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
-      }, 2000);
+      }, 1500);
 
     } catch (error) {
       console.error('User message error:', error);
@@ -317,7 +365,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
       // Resume conversation after a short delay
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
-      }, 2000);
+      }, 1500);
     }
   });
 
@@ -352,7 +400,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   }
 }
 
-// Generate next agent response with proper synchronization
+// Generate next agent response with enhanced focus
 async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
@@ -360,10 +408,28 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   }
 
   try {
-    // Select next agent (avoid same agent speaking twice in a row)
+    // Select next agent strategically (avoid same agent speaking twice in a row)
     const lastSpeaker = session.currentSpeaker;
     const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
-    const nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
+    
+    // Prioritize agents based on conversation flow and expertise relevance
+    let nextAgent;
+    if (userInput) {
+      // If user asked a question, select most relevant expert
+      if (userInput.toLowerCase().includes('research') || userInput.toLowerCase().includes('data')) {
+        nextAgent = agents.find(a => a.id === 'chen') || availableAgents[0];
+      } else if (userInput.toLowerCase().includes('business') || userInput.toLowerCase().includes('strategy')) {
+        nextAgent = agents.find(a => a.id === 'thompson') || availableAgents[0];
+      } else if (userInput.toLowerCase().includes('theory') || userInput.toLowerCase().includes('academic')) {
+        nextAgent = agents.find(a => a.id === 'rodriguez') || availableAgents[0];
+      } else if (userInput.toLowerCase().includes('future') || userInput.toLowerCase().includes('innovation')) {
+        nextAgent = agents.find(a => a.id === 'kim') || availableAgents[0];
+      } else {
+        nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
+      }
+    } else {
+      nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
+    }
 
     const response = await generateAgentResponse(
       geminiApiKey,
@@ -395,14 +461,14 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused) {
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 4000); // Wait for audio + 4 second pause between speakers
+      }, audioDuration + 2000); // Reduced pause for focused discussion
     } else if (session.totalMessages >= session.maxMessages) {
       // End conversation
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
-          message: 'The AI conference discussion has concluded. Thank you for participating!'
+          message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
         });
-      }, audioDuration + 2000);
+      }, audioDuration + 1500);
     }
 
   } catch (error) {

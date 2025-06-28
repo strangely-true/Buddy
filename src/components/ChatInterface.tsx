@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, MicOff, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -24,14 +24,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: 'Welcome to your AI conference! The agents are analyzing your content and will begin their discussion shortly. You can ask questions or join the conversation at any time.',
+      content: 'Welcome to your AI expert discussion! The specialists are analyzing your content and will begin their focused conversation shortly. You can ask questions or request clarification at any time.',
       sender: 'System',
       timestamp: new Date(),
       type: 'system'
     }
   ]);
   const [inputValue, setInputValue] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -128,11 +127,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
-    // Voice recording logic would go here
-  };
-
   const enableAutoScroll = () => {
     setAutoScroll(true);
     scrollToBottom();
@@ -145,7 +139,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <MessageSquare className="w-5 h-5 text-slate-600" />
-            <h3 className="font-medium text-slate-800">Chat & Questions</h3>
+            <h3 className="font-medium text-slate-800">Discussion Chat</h3>
           </div>
           {!autoScroll && (
             <button
@@ -203,7 +197,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                <span className="text-sm text-slate-600">AI is thinking...</span>
+                <span className="text-sm text-slate-600">Expert is responding...</span>
               </div>
             </div>
           </div>
@@ -219,35 +213,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask a question or join the conversation..."
+              placeholder="Ask questions about the topic or request clarification..."
               className="w-full p-3 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows={2}
               disabled={isProcessing}
             />
           </div>
           
-          <div className="flex flex-col space-y-2">
-            <button
-              onClick={toggleRecording}
-              className={`p-3 rounded-lg transition-colors ${
-                isRecording
-                  ? 'bg-red-600 text-white hover:bg-red-700'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-              title={isRecording ? 'Stop Recording' : 'Start Recording'}
-            >
-              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            </button>
-            
-            <button
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || isProcessing}
-              className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Send Message"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            onClick={handleSendMessage}
+            disabled={!inputValue.trim() || isProcessing}
+            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Send Message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+        
+        <div className="mt-2 text-xs text-slate-500">
+          💡 Ask specific questions to guide the expert discussion or request deeper analysis on particular points
         </div>
       </div>
     </div>
