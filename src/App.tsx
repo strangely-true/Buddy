@@ -45,7 +45,7 @@ function App() {
                 )}
               </div>
               
-              <FileUpload onSessionStart={handleSessionStart} />
+              <FileUpload onSessionStart={handleSessionStart} isApiKeyConfigured={apiKeyConfigured} />
             </div>
           </div>
         ) : (
