@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { MessageCircle, Settings, LogIn } from 'lucide-react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SessionProvider } from './contexts/SessionContext'
 import Header from './components/Header'
