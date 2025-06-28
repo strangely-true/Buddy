@@ -38,8 +38,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    if (autoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
@@ -67,7 +67,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
       const aiMessage: Message = {
-        id: Date.now().toString(),
+        id: `${Date.now()}_${Math.random()}`,
         content: data.message,
         sender: data.agentName,
         timestamp: new Date(data.timestamp),
@@ -79,7 +79,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
       const systemMessage: Message = {
-        id: Date.now().toString(),
+        id: `${Date.now()}_${Math.random()}`,
         content: data.message,
         sender: 'System',
         timestamp: new Date(),
@@ -97,7 +97,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (!inputValue.trim() || isProcessing || !socket) return;
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `${Date.now()}_${Math.random()}`,
       content: inputValue,
       sender: 'You',
       timestamp: new Date(),
@@ -133,9 +133,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col max-h-full">
       {/* Header */}
-      <div className="p-4 border-b border-slate-200">
+      <div className="p-4 border-b border-slate-200 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <MessageSquare className="w-5 h-5 text-slate-600" />
@@ -155,7 +155,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
         onScroll={handleScroll}
       >
         {messages.map((message) => (
@@ -164,7 +164,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${
+              className={`max-w-[85%] rounded-lg p-3 ${
                 message.type === 'user'
                   ? 'bg-blue-600 text-white'
                   : message.type === 'system'
@@ -177,7 +177,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   {message.sender}
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+              <div className="text-sm whitespace-pre-wrap break-words">{message.content}</div>
               <div className={`text-xs mt-1 opacity-75 ${
                 message.type === 'user' 
                   ? 'text-blue-100' 
@@ -192,7 +192,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         ))}
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 text-slate-800 rounded-lg p-3 max-w-[80%]">
+            <div className="bg-slate-100 text-slate-800 rounded-lg p-3 max-w-[85%]">
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
@@ -206,7 +206,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-slate-200">
+      <div className="p-4 border-t border-slate-200 flex-shrink-0">
         <div className="flex items-end space-x-2">
           <div className="flex-1">
             <textarea
@@ -223,7 +223,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isProcessing}
-            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             title="Send Message"
           >
             <Send className="w-4 h-4" />

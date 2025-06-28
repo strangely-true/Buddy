@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Users, PhoneOff, Pause, Play } from 'lucide-react';
+import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock } from 'lucide-react';
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 
@@ -24,6 +24,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   const [conversationStatus, setConversationStatus] = useState('preparing');
   const [isPaused, setIsPaused] = useState(false);
+  const [discussionTime, setDiscussionTime] = useState(0);
+  const [maxDiscussionTime] = useState(15 * 60); // 15 minutes in seconds
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
     { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
@@ -31,6 +34,47 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     { id: 'rodriguez', name: 'Prof. Elena Rodriguez', role: 'Domain Specialist', avatar: '👩‍🏫', color: 'bg-green-100 text-green-800' },
     { id: 'kim', name: 'Alex Kim', role: 'Innovation Lead', avatar: '👨‍💻', color: 'bg-orange-100 text-orange-800' },
   ];
+
+  // Timer management
+  useEffect(() => {
+    if (conversationStatus === 'active' && !isPaused) {
+      timerRef.current = setInterval(() => {
+        setDiscussionTime(prev => {
+          const newTime = prev + 1;
+          if (newTime >= maxDiscussionTime) {
+            // Auto-end discussion after 15 minutes
+            handleEndCall();
+            return maxDiscussionTime;
+          }
+          return newTime;
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [conversationStatus, isPaused, maxDiscussionTime]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getTimeColor = () => {
+    const percentage = discussionTime / maxDiscussionTime;
+    if (percentage > 0.8) return 'text-red-600';
+    if (percentage > 0.6) return 'text-orange-600';
+    return 'text-slate-600';
+  };
 
   useEffect(() => {
     // Initialize socket connection
@@ -98,6 +142,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         currentAudio.pause();
         currentAudio.src = '';
       }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
       newSocket.disconnect();
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
@@ -157,14 +204,29 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   const handleEndCall = () => {
     setIsCallActive(false);
+    setConversationStatus('ended');
+    
+    // Clean up audio
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.src = '';
+      setCurrentAudio(null);
     }
+    
+    // Clean up timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Clean up socket
     if (socket) {
       socket.emit('end-session', sessionId);
       socket.disconnect();
+      setSocket(null);
     }
+    
+    // Call parent handler
     onEndCall();
   };
 
@@ -198,39 +260,52 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             )}
           </div>
           
-          <div className="flex items-center space-x-2">
-            {/* Pause/Resume Button */}
-            <button
-              onClick={toggleConversation}
-              className={`p-2 rounded-lg transition-colors ${
-                isPaused 
-                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                  : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-              }`}
-              title={isPaused ? 'Resume Discussion' : 'Pause Discussion'}
-            >
-              {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-            </button>
+          <div className="flex items-center space-x-3">
+            {/* Discussion Timer */}
+            <div className="flex items-center space-x-1 text-sm">
+              <Clock className="w-4 h-4 text-slate-500" />
+              <span className={getTimeColor()}>
+                {formatTime(discussionTime)} / {formatTime(maxDiscussionTime)}
+              </span>
+            </div>
 
-            <button
-              onClick={toggleSpeaker}
-              className={`p-2 rounded-lg transition-colors ${
-                isSpeakerOn 
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
-                  : 'bg-red-100 text-red-700 hover:bg-red-200'
-              }`}
-              title={isSpeakerOn ? 'Mute Audio' : 'Unmute Audio'}
-            >
-              {isSpeakerOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </button>
+            {/* Control Buttons */}
+            <div className="flex items-center space-x-2">
+              {/* Pause/Resume Button */}
+              <button
+                onClick={toggleConversation}
+                disabled={!isCallActive || conversationStatus === 'ended'}
+                className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isPaused 
+                    ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                    : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                }`}
+                title={isPaused ? 'Resume Discussion' : 'Pause Discussion'}
+              >
+                {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+              </button>
 
-            <button
-              onClick={handleEndCall}
-              className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              title="End Discussion"
-            >
-              <PhoneOff className="w-4 h-4" />
-            </button>
+              <button
+                onClick={toggleSpeaker}
+                disabled={!isCallActive}
+                className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isSpeakerOn 
+                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
+                    : 'bg-red-100 text-red-700 hover:bg-red-200'
+                }`}
+                title={isSpeakerOn ? 'Mute Audio' : 'Unmute Audio'}
+              >
+                {isSpeakerOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
+
+              <button
+                onClick={handleEndCall}
+                className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                title="End Discussion"
+              >
+                <PhoneOff className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -284,6 +359,14 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <div className="mt-2">
               <div className="inline-flex items-center space-x-2 text-sm text-slate-500">
                 <span>✅ Expert discussion completed</span>
+              </div>
+            </div>
+          )}
+          {discussionTime >= maxDiscussionTime && (
+            <div className="mt-2">
+              <div className="inline-flex items-center space-x-2 text-sm text-red-600">
+                <Clock className="w-3 h-3" />
+                <span>Maximum discussion time reached</span>
               </div>
             </div>
           )}
