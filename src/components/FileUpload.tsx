@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, File, Image, Type, Loader2 } from 'lucide-react';
+import { Upload, File, Image, Type, Loader2, AlertCircle } from 'lucide-react';
+import { aiService } from '../services/aiService';
 
 interface FileUploadProps {
   onSessionStart: () => void;
@@ -9,6 +10,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart }) => {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [textPrompt, setTextPrompt] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -38,28 +40,90 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart }) => {
     if (files.length === 0) return;
     
     setUploading(true);
+    setError(null);
     
-    // Simulate file processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setUploading(false);
-    onSessionStart();
+    try {
+      // Process the first file
+      const file = files[0];
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          
+          // Extract text content based on file type
+          let textContent = '';
+          if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
+            textContent = content;
+          } else if (file.type === 'application/pdf') {
+            // For PDF files, we'll use a simplified approach
+            textContent = `PDF Document: ${file.name}\nContent analysis will be performed by AI agents.`;
+          } else if (file.type.startsWith('image/')) {
+            textContent = `Image: ${file.name}\nVisual content will be analyzed and discussed by AI agents.`;
+          } else {
+            textContent = `Document: ${file.name}\nContent will be analyzed and discussed by AI agents.`;
+          }
+          
+          // Process content with Gemini
+          await aiService.processContent(textContent, 'document');
+          
+          setUploading(false);
+          onSessionStart();
+        } catch (error) {
+          console.error('File processing error:', error);
+          setError('Failed to process file. Please check your API key configuration.');
+          setUploading(false);
+        }
+      };
+      
+      if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
+        reader.readAsText(file);
+      } else {
+        // For other file types, we'll create a description
+        const textContent = `File: ${file.name} (${file.type})\nSize: ${(file.size / 1024).toFixed(1)} KB\nThis content will be analyzed and discussed by AI agents.`;
+        await aiService.processContent(textContent, 'document');
+        setUploading(false);
+        onSessionStart();
+      }
+    } catch (error) {
+      console.error('File handling error:', error);
+      setError('Failed to process file. Please try again.');
+      setUploading(false);
+    }
   };
 
   const handleTextSubmit = async () => {
     if (!textPrompt.trim()) return;
     
     setUploading(true);
+    setError(null);
     
-    // Simulate text processing
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setUploading(false);
-    onSessionStart();
+    try {
+      await aiService.processContent(textPrompt, 'prompt');
+      setUploading(false);
+      onSessionStart();
+    } catch (error) {
+      console.error('Text processing error:', error);
+      setError('Failed to process prompt. Please check your API key configuration.');
+      setUploading(false);
+    }
   };
 
   return (
     <div className="space-y-8">
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h4 className="text-red-800 font-medium">Error</h4>
+            <p className="text-red-700 text-sm mt-1">{error}</p>
+            <p className="text-red-600 text-xs mt-2">
+              Make sure to configure your Gemini API key in the chat settings.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* File Upload Area */}
       <div
         className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 ${
@@ -84,7 +148,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart }) => {
         {uploading ? (
           <div className="space-y-4">
             <Loader2 className="w-12 h-12 text-blue-600 mx-auto animate-spin" />
-            <p className="text-lg text-slate-600">Processing your content...</p>
+            <p className="text-lg text-slate-600">Processing your content with AI...</p>
+            <p className="text-sm text-slate-500">This may take a moment</p>
           </div>
         ) : (
           <>
@@ -143,7 +208,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart }) => {
               {uploading ? (
                 <div className="flex items-center justify-center space-x-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Starting conversation...</span>
+                  <span>Starting AI conference...</span>
                 </div>
               ) : (
                 'Start AI Conference'
