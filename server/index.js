@@ -92,8 +92,10 @@ Response:`;
 
 // Generate speech using ElevenLabs
 async function generateSpeech(text, voiceId, elevenLabsApiKey) {
-  if (!elevenLabsApiKey) {
-    return null; // Return null if no API key
+  // Return null if no API key is provided
+  if (!elevenLabsApiKey || elevenLabsApiKey.trim() === '') {
+    console.log('ElevenLabs API key not provided, skipping speech generation');
+    return null;
   }
 
   try {
@@ -121,7 +123,17 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
 
     return Buffer.from(response.data).toString('base64');
   } catch (error) {
-    console.error('ElevenLabs API error:', error);
+    console.error('ElevenLabs API error:', error.response?.status, error.response?.statusText);
+    
+    // Handle specific error cases
+    if (error.response?.status === 401) {
+      console.error('ElevenLabs API authentication failed. Please check your API key.');
+    } else if (error.response?.status === 429) {
+      console.error('ElevenLabs API rate limit exceeded.');
+    } else if (error.response?.status === 400) {
+      console.error('ElevenLabs API bad request. Check your request parameters.');
+    }
+    
     return null;
   }
 }
@@ -205,7 +217,7 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
       const message = response.text;
       session.conversationHistory.push(`${openingAgent.name}: ${message}`);
 
-      // Generate speech
+      // Generate speech (will return null if no API key)
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
 
       // Emit to all users in the session
@@ -257,7 +269,7 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
 
       session.conversationHistory.push(`${randomAgent.name}: ${response}`);
 
-      // Generate speech
+      // Generate speech (will return null if no API key)
       const audioBase64 = await generateSpeech(response, randomAgent.voiceId, elevenLabsApiKey);
 
       // Emit agent response
@@ -315,7 +327,7 @@ async function startConversationLoop(sessionId, geminiApiKey, elevenLabsApiKey) 
 
       session.conversationHistory.push(`${nextAgent.name}: ${response}`);
 
-      // Generate speech
+      // Generate speech (will return null if no API key)
       const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
 
       // Emit to all users in the session
