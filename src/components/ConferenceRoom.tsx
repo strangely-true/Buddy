@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Users, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, Users, PhoneOff, Pause, Play } from 'lucide-react';
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 
@@ -24,6 +24,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   const [conversationStatus, setConversationStatus] = useState('preparing');
+  const [isListening, setIsListening] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [hasPermission, setHasPermission] = useState(false);
+  const [speechRecognition, setSpeechRecognition] = useState<any>(null);
+  const [transcript, setTranscript] = useState('');
 
   const participants = [
     { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
@@ -31,6 +36,61 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     { id: 'rodriguez', name: 'Prof. Elena Rodriguez', role: 'Domain Specialist', avatar: '👩‍🏫', color: 'bg-green-100 text-green-800' },
     { id: 'kim', name: 'Alex Kim', role: 'Innovation Lead', avatar: '👨‍💻', color: 'bg-orange-100 text-orange-800' },
   ];
+
+  // Initialize speech recognition
+  useEffect(() => {
+    const initSpeechRecognition = async () => {
+      try {
+        // Request microphone permission
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        setHasPermission(true);
+
+        // Initialize speech recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
+
+          recognition.onresult = (event) => {
+            let finalTranscript = '';
+            let interimTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const transcript = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+              } else {
+                interimTranscript += transcript;
+              }
+            }
+
+            if (finalTranscript) {
+              setTranscript(finalTranscript);
+              handleSpeechInput(finalTranscript);
+            }
+          };
+
+          recognition.onerror = (event) => {
+            console.error('Speech recognition error:', event.error);
+            setIsListening(false);
+          };
+
+          recognition.onend = () => {
+            setIsListening(false);
+          };
+
+          setSpeechRecognition(recognition);
+        }
+      } catch (error) {
+        console.error('Microphone permission denied:', error);
+        setHasPermission(false);
+      }
+    };
+
+    initSpeechRecognition();
+  }, []);
 
   useEffect(() => {
     // Initialize socket connection
@@ -46,8 +106,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       setCurrentTopic('AI Conference Discussion in Progress');
       setConversationStatus('active');
       
-      // Play audio if available and speaker is on
-      if (data.audio && isSpeakerOn) {
+      // Play audio if available, speaker is on, and not paused
+      if (data.audio && isSpeakerOn && !isPaused) {
         playAudio(data.audio, data.audioDuration || 5000);
       } else if (data.audioDuration) {
         // Even without audio, simulate the speaking duration
@@ -60,6 +120,18 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           setActiveParticipant(null);
         }, 5000);
       }
+    });
+
+    // Listen for conversation pause/resume
+    newSocket.on('conversation-paused', () => {
+      setIsPaused(true);
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+    });
+
+    newSocket.on('conversation-resumed', () => {
+      setIsPaused(false);
     });
 
     // Listen for conversation end
@@ -85,6 +157,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       if (currentAudio) {
         currentAudio.pause();
         currentAudio.src = '';
+      }
+      if (speechRecognition) {
+        speechRecognition.stop();
       }
       newSocket.disconnect();
     };
@@ -128,11 +203,62 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     }
   };
 
+  const handleSpeechInput = (speechText: string) => {
+    if (speechText.trim() && socket) {
+      // Pause conversation when user speaks
+      socket.emit('pause-conversation', sessionId);
+      
+      // Send speech as message
+      socket.emit('user-message', {
+        sessionId,
+        message: speechText,
+        geminiApiKey,
+        elevenLabsApiKey,
+        isVoiceInput: true
+      });
+
+      setTranscript('');
+    }
+  };
+
+  const toggleListening = () => {
+    if (!hasPermission || !speechRecognition) {
+      alert('Microphone permission is required for voice input.');
+      return;
+    }
+
+    if (isListening) {
+      speechRecognition.stop();
+      setIsListening(false);
+    } else {
+      speechRecognition.start();
+      setIsListening(true);
+    }
+  };
+
+  const toggleConversation = () => {
+    if (!socket) return;
+
+    if (isPaused) {
+      socket.emit('resume-conversation', sessionId);
+      setIsPaused(false);
+    } else {
+      socket.emit('pause-conversation', sessionId);
+      setIsPaused(true);
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+    }
+  };
+
   const handleEndCall = () => {
     setIsCallActive(false);
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.src = '';
+    }
+    if (speechRecognition) {
+      speechRecognition.stop();
     }
     if (socket) {
       socket.emit('end-session', sessionId);
@@ -163,13 +289,28 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               {isCallActive ? 'Live' : 'Ended'}
             </span>
             {conversationStatus === 'active' && (
-              <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                Speaking
+              <span className={`px-2 py-1 text-xs rounded-full ${
+                isPaused ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {isPaused ? 'Paused' : 'Speaking'}
               </span>
             )}
           </div>
           
           <div className="flex items-center space-x-2">
+            {/* Pause/Resume Button */}
+            <button
+              onClick={toggleConversation}
+              className={`p-2 rounded-lg transition-colors ${
+                isPaused 
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                  : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+              }`}
+              title={isPaused ? 'Resume Conversation' : 'Pause Conversation'}
+            >
+              {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+            </button>
+
             <button
               onClick={toggleSpeaker}
               className={`p-2 rounded-lg transition-colors ${
@@ -183,15 +324,18 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             </button>
             
             <button
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={toggleListening}
               className={`p-2 rounded-lg transition-colors ${
-                !isMuted 
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
-                  : 'bg-red-100 text-red-700 hover:bg-red-200'
+                isListening
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200 animate-pulse' 
+                  : hasPermission
+                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               }`}
-              title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+              title={isListening ? 'Stop Listening' : 'Start Voice Input'}
+              disabled={!hasPermission}
             >
-              {!isMuted ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
 
             <button
@@ -213,11 +357,24 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               key={participant.id}
               participant={participant}
               isActive={activeParticipant === participant.id}
-              isSpeaking={activeParticipant === participant.id}
+              isSpeaking={activeParticipant === participant.id && !isPaused}
             />
           ))}
         </div>
       </div>
+
+      {/* Voice Input Indicator */}
+      {isListening && (
+        <div className="px-6 py-2 bg-red-50 border-t border-red-200">
+          <div className="flex items-center justify-center space-x-2">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+            <span className="text-sm text-red-700 font-medium">Listening for your voice...</span>
+            {transcript && (
+              <span className="text-sm text-red-600 italic">"{transcript}"</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Current Topic */}
       <div className="p-6 border-t border-slate-200 bg-slate-50">
@@ -234,7 +391,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               </div>
             </div>
           )}
-          {conversationStatus === 'active' && activeParticipant && (
+          {conversationStatus === 'active' && activeParticipant && !isPaused && (
             <div className="mt-2">
               <div className="inline-flex items-center space-x-2 text-sm text-green-600">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -242,10 +399,25 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               </div>
             </div>
           )}
+          {isPaused && (
+            <div className="mt-2">
+              <div className="inline-flex items-center space-x-2 text-sm text-yellow-600">
+                <Pause className="w-3 h-3" />
+                <span>Conversation paused - Click play to resume</span>
+              </div>
+            </div>
+          )}
           {conversationStatus === 'ended' && (
             <div className="mt-2">
               <div className="inline-flex items-center space-x-2 text-sm text-slate-500">
                 <span>✅ Discussion completed</span>
+              </div>
+            </div>
+          )}
+          {!hasPermission && (
+            <div className="mt-2">
+              <div className="inline-flex items-center space-x-2 text-sm text-amber-600">
+                <span>⚠️ Microphone permission needed for voice input</span>
               </div>
             </div>
           )}

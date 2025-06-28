@@ -66,7 +66,7 @@ async function generateAgentResponse(geminiApiKey, agentId, context, conversatio
   
   if (!agent) throw new Error('Agent not found');
 
-  const conversationContext = conversationHistory.slice(-8).join('\n');
+  const conversationContext = conversationHistory.slice(-10).join('\n');
   
   const prompt = `You are ${agent.name}, a ${agent.role} with expertise in ${agent.expertise}. 
 Your personality is ${agent.personality}.
@@ -183,10 +183,12 @@ Keep the analysis concise but comprehensive.`;
       conversationHistory: [],
       participants: agents,
       isActive: true,
+      isPaused: false,
       currentSpeaker: null,
       conversationQueue: [],
       totalMessages: 0,
-      maxMessages: 20 // Limit for 5-15 minute conversation
+      maxMessages: 25, // Limit for 5-15 minute conversation
+      nextTimeout: null
     });
 
     res.json({ success: true, analysis });
@@ -247,9 +249,9 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
       });
 
       // Start the synchronized conversation loop
-      setTimeout(() => {
+      session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 2000); // Wait for audio to finish + 2 second pause
+      }, audioDuration + 3000); // Wait for audio to finish + 3 second pause
 
     } catch (error) {
       console.error('Conversation start error:', error);
@@ -258,7 +260,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
   });
 
   socket.on('user-message', async (data) => {
-    const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
+    const { sessionId, message, geminiApiKey, elevenLabsApiKey, isVoiceInput } = data;
     const session = sessions.get(sessionId);
     
     if (!session) {
@@ -267,19 +269,26 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
     }
 
     try {
+      // Clear any pending timeouts
+      if (session.nextTimeout) {
+        clearTimeout(session.nextTimeout);
+        session.nextTimeout = null;
+      }
+
       // Add user message to history
       session.conversationHistory.push(`User: ${message}`);
 
       // Emit user message to all participants
       io.to(sessionId).emit('user-message', {
         message,
-        timestamp: new Date()
+        timestamp: new Date(),
+        isVoiceInput
       });
 
       // Wait a moment then have an agent respond
-      setTimeout(async () => {
+      session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
-      }, 1500);
+      }, 2000);
 
     } catch (error) {
       console.error('User message error:', error);
@@ -287,10 +296,38 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
     }
   });
 
+  socket.on('pause-conversation', (sessionId) => {
+    const session = sessions.get(sessionId);
+    if (session) {
+      session.isPaused = true;
+      if (session.nextTimeout) {
+        clearTimeout(session.nextTimeout);
+        session.nextTimeout = null;
+      }
+      io.to(sessionId).emit('conversation-paused');
+    }
+  });
+
+  socket.on('resume-conversation', (sessionId) => {
+    const session = sessions.get(sessionId);
+    if (session) {
+      session.isPaused = false;
+      io.to(sessionId).emit('conversation-resumed');
+      
+      // Resume conversation after a short delay
+      session.nextTimeout = setTimeout(() => {
+        startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
+      }, 2000);
+    }
+  });
+
   socket.on('end-session', (sessionId) => {
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
+      if (session.nextTimeout) {
+        clearTimeout(session.nextTimeout);
+      }
       sessions.delete(sessionId);
     }
     io.to(sessionId).emit('session-ended');
@@ -304,7 +341,7 @@ Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) wo
 // Synchronized conversation function
 async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
-  if (!session || !session.isActive || session.totalMessages >= session.maxMessages) {
+  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
     return;
   }
 
@@ -318,7 +355,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
 // Generate next agent response with proper synchronization
 async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
   const session = sessions.get(sessionId);
-  if (!session || !session.isActive || session.totalMessages >= session.maxMessages) {
+  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
     return;
   }
 
@@ -355,13 +392,13 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     });
 
     // Schedule next response after current audio finishes
-    if (session.totalMessages < session.maxMessages) {
-      setTimeout(() => {
+    if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused) {
+      session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 3000); // Wait for audio + 3 second pause between speakers
-    } else {
+      }, audioDuration + 4000); // Wait for audio + 4 second pause between speakers
+    } else if (session.totalMessages >= session.maxMessages) {
       // End conversation
-      setTimeout(() => {
+      session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The AI conference discussion has concluded. Thank you for participating!'
         });
