@@ -231,10 +231,39 @@ function estimateAudioDuration(text) {
   return Math.max(durationSeconds * 1000, 2500);
 }
 
-// Process content with multimodal support
+// Generate conversation title from content
+function generateConversationTitle(content, contentType) {
+  const maxLength = 60;
+  
+  if (contentType === 'multimodal') {
+    return 'Multimodal Analysis Discussion';
+  }
+  
+  const textContent = typeof content === 'object' ? content.text : content;
+  
+  // Extract first meaningful sentence or phrase
+  const sentences = textContent.split(/[.!?]+/);
+  const firstSentence = sentences[0]?.trim();
+  
+  if (firstSentence && firstSentence.length <= maxLength) {
+    return firstSentence;
+  }
+  
+  // Truncate and add ellipsis
+  const truncated = textContent.substring(0, maxLength).trim();
+  const lastSpace = truncated.lastIndexOf(' ');
+  
+  if (lastSpace > maxLength * 0.7) {
+    return truncated.substring(0, lastSpace) + '...';
+  }
+  
+  return truncated + '...';
+}
+
+// Process content with multimodal support and database storage
 app.post('/api/process-content', async (req, res) => {
   try {
-    const { content, type, sessionId, geminiApiKey } = req.body;
+    const { content, type, sessionId, geminiApiKey, userId } = req.body;
     
     if (!geminiApiKey) {
       return res.status(400).json({ error: 'Gemini API key required' });
@@ -300,6 +329,7 @@ Time limit: 5-15 minutes of focused expert discussion.`;
     });
 
     const analysis = response.text;
+    const title = generateConversationTitle(content, type);
 
     // Store session data with time limits
     sessions.set(sessionId, {
@@ -311,17 +341,70 @@ Time limit: 5-15 minutes of focused expert discussion.`;
       currentSpeaker: null,
       conversationQueue: [],
       totalMessages: 0,
-      maxMessages: 18, // Focused discussion limit
+      maxMessages: 18,
       nextTimeout: null,
       topicBoundaries: analysis,
       startTime: Date.now(),
-      maxDuration: 15 * 60 * 1000 // 15 minutes in milliseconds
+      maxDuration: 15 * 60 * 1000,
+      userId: userId,
+      title: title,
+      contentType: type,
+      conversationId: null // Will be set when conversation is created in database
     });
 
-    res.json({ success: true, analysis });
+    res.json({ success: true, analysis, title });
   } catch (error) {
     console.error('Content processing error:', error);
     res.status(500).json({ error: 'Failed to process content' });
+  }
+});
+
+// Create conversation in database
+app.post('/api/create-conversation', async (req, res) => {
+  try {
+    const { sessionId, userId, title, topicAnalysis, contentType } = req.body;
+    
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Store conversation ID in session for message storage
+    session.conversationId = sessionId; // Using sessionId as conversation identifier
+    
+    res.json({ success: true, conversationId: sessionId });
+  } catch (error) {
+    console.error('Error creating conversation:', error);
+    res.status(500).json({ error: 'Failed to create conversation' });
+  }
+});
+
+// Get conversation history
+app.get('/api/conversation/:sessionId/messages', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessions.get(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Return conversation history from session
+    const messages = session.conversationHistory.map((msg, index) => {
+      const [speaker, ...contentParts] = msg.split(': ');
+      return {
+        id: `msg_${index}`,
+        speaker_name: speaker,
+        message_content: contentParts.join(': '),
+        timestamp: new Date(Date.now() - (session.conversationHistory.length - index) * 30000).toISOString(),
+        sequence_number: index + 1
+      };
+    });
+
+    res.json({ messages });
+  } catch (error) {
+    console.error('Error getting conversation messages:', error);
+    res.status(500).json({ error: 'Failed to get messages' });
   }
 });
 
@@ -335,7 +418,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('start-conversation', async (data) => {
-    const { sessionId, geminiApiKey, elevenLabsApiKey } = data;
+    const { sessionId, geminiApiKey, elevenLabsApiKey, userId } = data;
     const session = sessions.get(sessionId);
     
     if (!session) {
@@ -344,6 +427,30 @@ io.on('connection', (socket) => {
     }
 
     try {
+      // Create conversation in database if userId is provided
+      if (userId) {
+        try {
+          const response = await fetch('http://localhost:3001/api/create-conversation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              userId,
+              title: session.title,
+              topicAnalysis: session.topic,
+              contentType: session.contentType
+            })
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            session.conversationId = result.conversationId;
+          }
+        } catch (error) {
+          console.error('Error creating conversation in database:', error);
+        }
+      }
+
       const openingAgent = agents[0]; // Dr. Chen
       const openingPrompt = `${openingAgent.systemPrompt}
 
@@ -453,10 +560,15 @@ Your opening statement:`;
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
+      session.status = 'completed';
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
       }
-      sessions.delete(sessionId);
+      
+      // Keep session data for a while for potential database storage
+      setTimeout(() => {
+        sessions.delete(sessionId);
+      }, 60000); // Delete after 1 minute
     }
     io.to(sessionId).emit('session-ended');
   });
@@ -476,6 +588,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   // Check time limit
   const elapsed = Date.now() - session.startTime;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    session.status = 'completed';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -499,6 +612,7 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   // Check limits
   const elapsed = Date.now() - session.startTime;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    session.status = 'completed';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -559,6 +673,7 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       }, audioDuration + 2000);
     } else {
       // End conversation
+      session.status = 'completed';
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
