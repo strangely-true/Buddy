@@ -34,12 +34,20 @@ function AppContent() {
   }
 
   const handleEndCall = () => {
+    // Clear session state first
     setHasSession(false)
     setSessionId('')
-    setCurrentView('dashboard')
+    
+    // Use setTimeout to ensure state is cleared before navigation
+    setTimeout(() => {
+      setCurrentView('dashboard')
+    }, 100)
   }
 
   const handleStartNewConference = () => {
+    // Clear any existing session state
+    setHasSession(false)
+    setSessionId('')
     setCurrentView('upload')
   }
 
@@ -128,7 +136,7 @@ function AppContent() {
             </div>
           )}
 
-          {currentView === 'conference' && hasSession && (
+          {currentView === 'conference' && hasSession && sessionId && (
             <div className="container mx-auto px-4 py-4">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
                 <div className="lg:col-span-2">

@@ -27,6 +27,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [discussionTime, setDiscussionTime] = useState(0);
   const [maxDiscussionTime] = useState(15 * 60); // 15 minutes in seconds
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const cleanupRef = useRef<boolean>(false);
 
   const participants = [
     { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
@@ -37,7 +38,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   // Timer management
   useEffect(() => {
-    if (conversationStatus === 'active' && !isPaused) {
+    if (conversationStatus === 'active' && !isPaused && !cleanupRef.current) {
       timerRef.current = setInterval(() => {
         setDiscussionTime(prev => {
           const newTime = prev + 1;
@@ -76,135 +77,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     return 'text-slate-600';
   };
 
-  useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io('http://localhost:3001');
-    setSocket(newSocket);
-
-    // Join session
-    newSocket.emit('join-session', sessionId);
-
-    // Listen for agent messages
-    newSocket.on('agent-message', (data) => {
-      setActiveParticipant(data.agentId);
-      setCurrentTopic('AI Expert Discussion in Progress');
-      setConversationStatus('active');
-      
-      // Play audio if available, speaker is on, and not paused
-      if (data.audio && isSpeakerOn && !isPaused) {
-        playAudio(data.audio, data.audioDuration || 5000);
-      } else if (data.audioDuration) {
-        // Even without audio, simulate the speaking duration
-        setTimeout(() => {
-          setActiveParticipant(null);
-        }, data.audioDuration);
-      } else {
-        // Default timeout if no duration provided
-        setTimeout(() => {
-          setActiveParticipant(null);
-        }, 5000);
-      }
-    });
-
-    // Listen for conversation pause/resume
-    newSocket.on('conversation-paused', () => {
-      setIsPaused(true);
-      if (currentAudio) {
-        currentAudio.pause();
-      }
-    });
-
-    newSocket.on('conversation-resumed', () => {
-      setIsPaused(false);
-    });
-
-    // Listen for conversation end
-    newSocket.on('conversation-ended', (data) => {
-      setConversationStatus('ended');
-      setCurrentTopic(data.message);
-      setActiveParticipant(null);
-    });
-
-    // Listen for session end
-    newSocket.on('session-ended', () => {
-      setIsCallActive(false);
-    });
-
-    // Start conversation
-    newSocket.emit('start-conversation', {
-      sessionId,
-      geminiApiKey,
-      elevenLabsApiKey
-    });
-
-    return () => {
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.src = '';
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      newSocket.disconnect();
-    };
-  }, [sessionId, geminiApiKey, elevenLabsApiKey]);
-
-  const playAudio = (audioBase64: string, duration: number) => {
-    try {
-      // Stop any currently playing audio
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.src = '';
-      }
-
-      const audioBlob = new Blob([Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      setCurrentAudio(audio);
-      
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        setActiveParticipant(null);
-        setCurrentAudio(null);
-      };
-
-      audio.onerror = () => {
-        console.error('Audio playback error');
-        URL.revokeObjectURL(audioUrl);
-        setActiveParticipant(null);
-        setCurrentAudio(null);
-      };
-      
-      audio.play().catch(error => {
-        console.error('Audio playback error:', error);
-        setActiveParticipant(null);
-        setCurrentAudio(null);
-      });
-    } catch (error) {
-      console.error('Audio processing error:', error);
-      setActiveParticipant(null);
-    }
-  };
-
-  const toggleConversation = () => {
-    if (!socket) return;
-
-    if (isPaused) {
-      socket.emit('resume-conversation', sessionId);
-      setIsPaused(false);
-    } else {
-      socket.emit('pause-conversation', sessionId);
-      setIsPaused(true);
-      if (currentAudio) {
-        currentAudio.pause();
-      }
-    }
-  };
-
-  const handleEndCall = () => {
-    setIsCallActive(false);
-    setConversationStatus('ended');
+  const cleanupResources = () => {
+    cleanupRef.current = true;
     
     // Clean up audio
     if (currentAudio) {
@@ -226,8 +100,159 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       setSocket(null);
     }
     
-    // Call parent handler
-    onEndCall();
+    setActiveParticipant(null);
+    setIsCallActive(false);
+    setConversationStatus('ended');
+  };
+
+  useEffect(() => {
+    // Initialize socket connection
+    const newSocket = io('http://localhost:3001');
+    setSocket(newSocket);
+
+    // Join session
+    newSocket.emit('join-session', sessionId);
+
+    // Listen for agent messages
+    newSocket.on('agent-message', (data) => {
+      if (cleanupRef.current) return;
+      
+      setActiveParticipant(data.agentId);
+      setCurrentTopic('AI Expert Discussion in Progress');
+      setConversationStatus('active');
+      
+      // Play audio if available, speaker is on, and not paused
+      if (data.audio && isSpeakerOn && !isPaused) {
+        playAudio(data.audio, data.audioDuration || 5000);
+      } else if (data.audioDuration) {
+        // Even without audio, simulate the speaking duration
+        setTimeout(() => {
+          if (!cleanupRef.current) {
+            setActiveParticipant(null);
+          }
+        }, data.audioDuration);
+      } else {
+        // Default timeout if no duration provided
+        setTimeout(() => {
+          if (!cleanupRef.current) {
+            setActiveParticipant(null);
+          }
+        }, 5000);
+      }
+    });
+
+    // Listen for conversation pause/resume
+    newSocket.on('conversation-paused', () => {
+      if (cleanupRef.current) return;
+      setIsPaused(true);
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+    });
+
+    newSocket.on('conversation-resumed', () => {
+      if (cleanupRef.current) return;
+      setIsPaused(false);
+    });
+
+    // Listen for conversation end
+    newSocket.on('conversation-ended', (data) => {
+      if (cleanupRef.current) return;
+      setConversationStatus('ended');
+      setCurrentTopic(data.message);
+      setActiveParticipant(null);
+    });
+
+    // Listen for session end
+    newSocket.on('session-ended', () => {
+      if (cleanupRef.current) return;
+      setIsCallActive(false);
+    });
+
+    // Start conversation
+    newSocket.emit('start-conversation', {
+      sessionId,
+      geminiApiKey,
+      elevenLabsApiKey
+    });
+
+    return () => {
+      cleanupResources();
+    };
+  }, [sessionId, geminiApiKey, elevenLabsApiKey]);
+
+  const playAudio = (audioBase64: string, duration: number) => {
+    if (cleanupRef.current) return;
+    
+    try {
+      // Stop any currently playing audio
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
+
+      const audioBlob = new Blob([Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      setCurrentAudio(audio);
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        if (!cleanupRef.current) {
+          setActiveParticipant(null);
+          setCurrentAudio(null);
+        }
+      };
+
+      audio.onerror = () => {
+        console.error('Audio playback error');
+        URL.revokeObjectURL(audioUrl);
+        if (!cleanupRef.current) {
+          setActiveParticipant(null);
+          setCurrentAudio(null);
+        }
+      };
+      
+      audio.play().catch(error => {
+        console.error('Audio playback error:', error);
+        if (!cleanupRef.current) {
+          setActiveParticipant(null);
+          setCurrentAudio(null);
+        }
+      });
+    } catch (error) {
+      console.error('Audio processing error:', error);
+      if (!cleanupRef.current) {
+        setActiveParticipant(null);
+      }
+    }
+  };
+
+  const toggleConversation = () => {
+    if (!socket || cleanupRef.current) return;
+
+    if (isPaused) {
+      socket.emit('resume-conversation', sessionId);
+      setIsPaused(false);
+    } else {
+      socket.emit('pause-conversation', sessionId);
+      setIsPaused(true);
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+    }
+  };
+
+  const handleEndCall = () => {
+    if (cleanupRef.current) return;
+    
+    cleanupResources();
+    
+    // Call parent handler with a slight delay to ensure cleanup is complete
+    setTimeout(() => {
+      onEndCall();
+    }, 100);
   };
 
   const toggleSpeaker = () => {
@@ -274,7 +299,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               {/* Pause/Resume Button */}
               <button
                 onClick={toggleConversation}
-                disabled={!isCallActive || conversationStatus === 'ended'}
+                disabled={!isCallActive || conversationStatus === 'ended' || cleanupRef.current}
                 className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   isPaused 
                     ? 'bg-green-100 text-green-700 hover:bg-green-200' 
@@ -287,7 +312,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               <button
                 onClick={toggleSpeaker}
-                disabled={!isCallActive}
+                disabled={!isCallActive || cleanupRef.current}
                 className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   isSpeakerOn 
                     ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
@@ -300,7 +325,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               <button
                 onClick={handleEndCall}
-                className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                disabled={cleanupRef.current}
+                className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
                 title="End Discussion"
               >
                 <PhoneOff className="w-4 h-4" />

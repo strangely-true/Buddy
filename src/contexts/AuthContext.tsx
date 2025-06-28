@@ -41,6 +41,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change:', event, session?.user?.email)
+      
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
@@ -48,6 +50,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Create or update user profile
       if (session?.user && event === 'SIGNED_IN') {
         await createOrUpdateUserProfile(session.user)
+      }
+
+      // Handle sign out
+      if (event === 'SIGNED_OUT') {
+        // Clear any cached data
+        localStorage.removeItem('supabase.auth.token')
+        setUser(null)
+        setSession(null)
       }
     })
 
@@ -79,7 +89,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}`,
         },
       })
       if (error) throw error
@@ -91,10 +101,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const signOut = async () => {
     try {
+      setLoading(true)
+      
+      // Clear local storage
+      localStorage.removeItem('supabase.auth.token')
+      localStorage.removeItem('gemini_api_key')
+      localStorage.removeItem('elevenlabs_api_key')
+      
+      // Sign out from Supabase
       const { error } = await supabase.auth.signOut()
       if (error) throw error
+      
+      // Clear state immediately
+      setUser(null)
+      setSession(null)
+      
+      // Force a complete page reload to clear all state
+      setTimeout(() => {
+        window.location.href = '/'
+      }, 100)
+      
     } catch (error) {
       console.error('Error signing out:', error)
+      setLoading(false)
       throw error
     }
   }
