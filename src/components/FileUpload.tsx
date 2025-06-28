@@ -64,17 +64,76 @@ const FileUpload: React.FC<FileUploadProps> = ({
           const content = e.target?.result as string;
           
           let textContent = '';
+          let documentType = 'document';
+          
           if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
             textContent = content;
+            documentType = 'text document';
           } else if (file.type === 'application/pdf') {
-            textContent = `PDF Document: ${file.name}\nContent analysis will be performed by AI agents.`;
+            textContent = `PDF Document Analysis Request:
+            
+File: ${file.name}
+Size: ${(file.size / 1024).toFixed(1)} KB
+
+Please analyze this PDF document and extract key insights, themes, and discussion points. Focus on:
+- Main concepts and ideas
+- Key arguments or findings
+- Areas for debate or further exploration
+- Practical implications
+- Different perspectives that could be explored
+
+Create a focused discussion around the core content of this document.`;
+            documentType = 'PDF document';
           } else if (file.type.startsWith('image/')) {
-            textContent = `Image: ${file.name}\nVisual content will be analyzed and discussed by AI agents.`;
+            textContent = `Image Analysis Request:
+            
+File: ${file.name}
+Type: ${file.type}
+Size: ${(file.size / 1024).toFixed(1)} KB
+
+Please analyze this image and create a discussion around:
+- Visual elements and composition
+- Potential meanings or interpretations
+- Context and implications
+- Different analytical perspectives
+- Relevant themes for discussion
+
+Focus on creating meaningful dialogue about what this image represents or communicates.`;
+            documentType = 'image';
+          } else if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+            textContent = `Word Document Analysis Request:
+            
+File: ${file.name}
+Size: ${(file.size / 1024).toFixed(1)} KB
+
+Please analyze this Word document and extract:
+- Key themes and concepts
+- Main arguments or points
+- Discussion-worthy topics
+- Different analytical angles
+- Practical applications
+
+Create a focused academic discussion around the document's core content.`;
+            documentType = 'Word document';
           } else {
-            textContent = `Document: ${file.name}\nContent will be analyzed and discussed by AI agents.`;
+            textContent = `Document Analysis Request:
+            
+File: ${file.name}
+Type: ${file.type}
+Size: ${(file.size / 1024).toFixed(1)} KB
+
+Please analyze this document and create a structured discussion around:
+- Core themes and concepts
+- Key insights or findings
+- Areas for debate
+- Multiple perspectives
+- Practical implications
+
+Focus on extracting meaningful discussion points from the document content.`;
+            documentType = 'document';
           }
           
-          await processContent(textContent, 'document');
+          await processContent(textContent, documentType);
         } catch (error) {
           console.error('File processing error:', error);
           setError('Failed to process file. Please check your API key configuration.');
@@ -85,8 +144,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
         reader.readAsText(file);
       } else {
-        const textContent = `File: ${file.name} (${file.type})\nSize: ${(file.size / 1024).toFixed(1)} KB\nThis content will be analyzed and discussed by AI agents.`;
-        await processContent(textContent, 'document');
+        // For non-text files, we'll send the file info for analysis
+        const textContent = `Document Upload:
+        
+File: ${file.name}
+Type: ${file.type}
+Size: ${(file.size / 1024).toFixed(1)} KB
+
+Please create a focused discussion about analyzing and understanding this type of document. Discuss methodologies, approaches, and key considerations for extracting insights from ${file.type} files.`;
+        await processContent(textContent, 'document upload');
       }
     } catch (error) {
       console.error('File handling error:', error);
@@ -107,7 +173,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     setError(null);
     
     try {
-      await processContent(textPrompt, 'prompt');
+      await processContent(textPrompt, 'text prompt');
     } catch (error) {
       console.error('Text processing error:', error);
       setError('Failed to process prompt. Please check your API key configuration.');
@@ -168,7 +234,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           type="file"
           multiple
-          accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.webp"
+          accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.webp,.csv,.json"
           onChange={handleFileInput}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           disabled={uploading || !isApiKeyConfigured}
@@ -178,24 +244,24 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <div className="space-y-4">
             <Loader2 className="w-12 h-12 text-blue-600 mx-auto animate-spin" />
             <p className="text-lg text-slate-600">Processing your content with AI...</p>
-            <p className="text-sm text-slate-500">This may take a moment</p>
+            <p className="text-sm text-slate-500">Analyzing document and preparing discussion topics</p>
           </div>
         ) : (
           <>
             <Upload className={`w-16 h-16 mx-auto mb-6 ${isApiKeyConfigured ? 'text-slate-400' : 'text-slate-300'}`} />
             <h3 className={`text-2xl font-medium mb-2 ${isApiKeyConfigured ? 'text-slate-800' : 'text-slate-500'}`}>
-              Upload Documents or Images
+              Upload Documents for AI Analysis
             </h3>
             <p className={`mb-6 ${isApiKeyConfigured ? 'text-slate-600' : 'text-slate-400'}`}>
               {isApiKeyConfigured 
-                ? 'Drag and drop files here, or click to browse'
-                : 'Configure your API keys to upload files'
+                ? 'Upload any document and our AI agents will analyze it and create a focused discussion'
+                : 'Configure your API keys to upload and analyze documents'
               }
             </p>
             <div className={`flex items-center justify-center space-x-6 text-sm ${isApiKeyConfigured ? 'text-slate-500' : 'text-slate-400'}`}>
               <div className="flex items-center space-x-2">
                 <File className="w-4 h-4" />
-                <span>PDF, DOC, TXT</span>
+                <span>PDF, DOC, TXT, CSV</span>
               </div>
               <div className="flex items-center space-x-2">
                 <Image className="w-4 h-4" />
@@ -213,7 +279,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         </div>
         <div className="relative flex justify-center text-sm">
           <span className="px-4 bg-gradient-to-br from-slate-50 to-slate-100 text-slate-500">
-            or start with a prompt
+            or start with a topic
           </span>
         </div>
       </div>
@@ -229,7 +295,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               value={textPrompt}
               onChange={(e) => setTextPrompt(e.target.value)}
               placeholder={isApiKeyConfigured 
-                ? "Describe a topic you'd like the AI agents to discuss..."
+                ? "Describe a topic, concept, or question you'd like the AI experts to discuss in detail..."
                 : "Configure your API keys to start a conversation..."
               }
               className="w-full h-32 p-4 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
@@ -246,11 +312,22 @@ const FileUpload: React.FC<FileUploadProps> = ({
                   <span>Starting AI conference...</span>
                 </div>
               ) : (
-                'Start AI Conference'
+                'Start AI Conference Discussion'
               )}
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Tips */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h4 className="text-blue-800 font-medium mb-2">💡 Tips for Better Discussions</h4>
+        <ul className="text-blue-700 text-sm space-y-1">
+          <li>• Upload research papers, reports, or articles for in-depth analysis</li>
+          <li>• Ask specific questions to guide the AI experts' focus</li>
+          <li>• Use your voice to join the conversation naturally</li>
+          <li>• Pause the discussion anytime to ask follow-up questions</li>
+        </ul>
       </div>
     </div>
   );
