@@ -34,15 +34,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Handle manual scrolling to disable auto-scroll
+  const handleScroll = () => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+      setAutoScroll(isAtBottom);
+    }
+  };
 
   useEffect(() => {
     // Initialize socket connection
@@ -64,9 +77,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setMessages(prev => [...prev, aiMessage]);
     });
 
-    // Listen for user messages (from other participants)
-    newSocket.on('user-message', (data) => {
-      // Don't add our own messages again
+    // Listen for conversation end
+    newSocket.on('conversation-ended', (data) => {
+      const systemMessage: Message = {
+        id: Date.now().toString(),
+        content: data.message,
+        sender: 'System',
+        timestamp: new Date(),
+        type: 'system'
+      };
+      setMessages(prev => [...prev, systemMessage]);
     });
 
     return () => {
@@ -113,18 +133,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Voice recording logic would go here
   };
 
+  const enableAutoScroll = () => {
+    setAutoScroll(true);
+    scrollToBottom();
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-slate-200">
-        <div className="flex items-center space-x-2">
-          <MessageSquare className="w-5 h-5 text-slate-600" />
-          <h3 className="font-medium text-slate-800">Chat & Questions</h3>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <MessageSquare className="w-5 h-5 text-slate-600" />
+            <h3 className="font-medium text-slate-800">Chat & Questions</h3>
+          </div>
+          {!autoScroll && (
+            <button
+              onClick={enableAutoScroll}
+              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+            >
+              ↓ New messages
+            </button>
+          )}
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+        onScroll={handleScroll}
+      >
         {messages.map((message) => (
           <div
             key={message.id}
@@ -144,7 +183,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   {message.sender}
                 </div>
               )}
-              <div className="text-sm">{message.content}</div>
+              <div className="text-sm whitespace-pre-wrap">{message.content}</div>
               <div className={`text-xs mt-1 opacity-75 ${
                 message.type === 'user' 
                   ? 'text-blue-100' 

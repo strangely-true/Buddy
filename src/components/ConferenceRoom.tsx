@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Users, PhoneOff } from 'lucide-react';
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
@@ -22,6 +22,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [currentTopic, setCurrentTopic] = useState('Preparing AI conference...');
   const [isCallActive, setIsCallActive] = useState(true);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  const [conversationStatus, setConversationStatus] = useState('preparing');
 
   const participants = [
     { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
@@ -42,16 +44,29 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     newSocket.on('agent-message', (data) => {
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Conference Discussion in Progress');
+      setConversationStatus('active');
       
       // Play audio if available and speaker is on
       if (data.audio && isSpeakerOn) {
-        playAudio(data.audio);
+        playAudio(data.audio, data.audioDuration || 5000);
+      } else if (data.audioDuration) {
+        // Even without audio, simulate the speaking duration
+        setTimeout(() => {
+          setActiveParticipant(null);
+        }, data.audioDuration);
+      } else {
+        // Default timeout if no duration provided
+        setTimeout(() => {
+          setActiveParticipant(null);
+        }, 5000);
       }
+    });
 
-      // Clear active participant after speaking
-      setTimeout(() => {
-        setActiveParticipant(null);
-      }, 4000);
+    // Listen for conversation end
+    newSocket.on('conversation-ended', (data) => {
+      setConversationStatus('ended');
+      setCurrentTopic(data.message);
+      setActiveParticipant(null);
     });
 
     // Listen for session end
@@ -67,35 +82,71 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     });
 
     return () => {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
       newSocket.disconnect();
     };
-  }, [sessionId, geminiApiKey, elevenLabsApiKey, isSpeakerOn]);
+  }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
-  const playAudio = (audioBase64: string) => {
+  const playAudio = (audioBase64: string, duration: number) => {
     try {
+      // Stop any currently playing audio
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
+
       const audioBlob = new Blob([Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       
+      setCurrentAudio(audio);
+      
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        setActiveParticipant(null);
+        setCurrentAudio(null);
+      };
+
+      audio.onerror = () => {
+        console.error('Audio playback error');
+        URL.revokeObjectURL(audioUrl);
+        setActiveParticipant(null);
+        setCurrentAudio(null);
       };
       
       audio.play().catch(error => {
         console.error('Audio playback error:', error);
+        setActiveParticipant(null);
+        setCurrentAudio(null);
       });
     } catch (error) {
       console.error('Audio processing error:', error);
+      setActiveParticipant(null);
     }
   };
 
   const handleEndCall = () => {
     setIsCallActive(false);
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+    }
     if (socket) {
       socket.emit('end-session', sessionId);
       socket.disconnect();
     }
     onEndCall();
+  };
+
+  const toggleSpeaker = () => {
+    setIsSpeakerOn(!isSpeakerOn);
+    if (!isSpeakerOn && currentAudio) {
+      currentAudio.pause();
+      setActiveParticipant(null);
+    }
   };
 
   return (
@@ -111,11 +162,16 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             }`}>
               {isCallActive ? 'Live' : 'Ended'}
             </span>
+            {conversationStatus === 'active' && (
+              <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                Speaking
+              </span>
+            )}
           </div>
           
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+              onClick={toggleSpeaker}
               className={`p-2 rounded-lg transition-colors ${
                 isSpeakerOn 
                   ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
@@ -170,11 +226,26 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           <p className="text-lg font-medium text-slate-800">
             {currentTopic}
           </p>
-          {currentTopic === 'Preparing AI conference...' && (
+          {conversationStatus === 'preparing' && (
             <div className="mt-2">
               <div className="inline-flex items-center space-x-2 text-sm text-slate-500">
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                 <span>Starting conversation...</span>
+              </div>
+            </div>
+          )}
+          {conversationStatus === 'active' && activeParticipant && (
+            <div className="mt-2">
+              <div className="inline-flex items-center space-x-2 text-sm text-green-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>{participants.find(p => p.id === activeParticipant)?.name} is speaking...</span>
+              </div>
+            </div>
+          )}
+          {conversationStatus === 'ended' && (
+            <div className="mt-2">
+              <div className="inline-flex items-center space-x-2 text-sm text-slate-500">
+                <span>✅ Discussion completed</span>
               </div>
             </div>
           )}

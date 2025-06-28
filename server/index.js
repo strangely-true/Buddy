@@ -23,7 +23,7 @@ app.use(express.json());
 // Store active sessions
 const sessions = new Map();
 
-// AI Agents configuration
+// AI Agents configuration with unique voices
 const agents = [
   {
     id: 'chen',
@@ -31,7 +31,7 @@ const agents = [
     role: 'Research Analyst',
     personality: 'analytical, methodical, data-driven',
     expertise: 'research methodology, data analysis, scientific approach',
-    voiceId: 'EXAVITQu4vr4xnSDxMaL' // Bella voice
+    voiceId: 'EXAVITQu4vr4xnSDxMaL' // Bella - professional female voice
   },
   {
     id: 'thompson',
@@ -39,7 +39,7 @@ const agents = [
     role: 'Strategy Expert',
     personality: 'strategic, decisive, business-focused',
     expertise: 'business strategy, market analysis, competitive intelligence',
-    voiceId: 'pNInz6obpgDQGcFmaJgB' // Adam voice
+    voiceId: 'pNInz6obpgDQGcFmaJgB' // Adam - confident male voice
   },
   {
     id: 'rodriguez',
@@ -47,7 +47,7 @@ const agents = [
     role: 'Domain Specialist',
     personality: 'academic, thorough, theoretical',
     expertise: 'theoretical frameworks, academic research, conceptual analysis',
-    voiceId: 'XB0fDUnXU5powFXDhCwa' // Charlotte voice
+    voiceId: 'XB0fDUnXU5powFXDhCwa' // Charlotte - academic female voice
   },
   {
     id: 'kim',
@@ -55,7 +55,7 @@ const agents = [
     role: 'Innovation Lead',
     personality: 'creative, forward-thinking, disruptive',
     expertise: 'innovation, emerging technologies, future trends',
-    voiceId: 'onwK4e9ZLuTAKqWW03F9' // Daniel voice
+    voiceId: 'onwK4e9ZLuTAKqWW03F9' // Daniel - energetic male voice
   }
 ];
 
@@ -66,7 +66,7 @@ async function generateAgentResponse(geminiApiKey, agentId, context, conversatio
   
   if (!agent) throw new Error('Agent not found');
 
-  const conversationContext = conversationHistory.slice(-10).join('\n');
+  const conversationContext = conversationHistory.slice(-8).join('\n');
   
   const prompt = `You are ${agent.name}, a ${agent.role} with expertise in ${agent.expertise}. 
 Your personality is ${agent.personality}.
@@ -76,9 +76,9 @@ Current discussion topic: ${context}
 Recent conversation:
 ${conversationContext}
 
-${userInput ? `A user just said: "${userInput}"` : 'Continue the discussion naturally, building on previous points or introducing new perspectives.'}
+${userInput ? `A user just said: "${userInput}"` : 'Continue the discussion naturally, building on previous points or introducing new perspectives related to your expertise.'}
 
-Respond as ${agent.name} would, staying in character. Keep responses conversational, insightful, and around 2-3 sentences. Make it engaging and natural.
+Respond as ${agent.name} would, staying in character. Keep responses conversational, insightful, and 2-4 sentences. Make it engaging and natural. Build meaningfully on what others have said.
 
 Response:`;
 
@@ -90,7 +90,7 @@ Response:`;
   return response.text;
 }
 
-// Generate speech using ElevenLabs
+// Generate speech using ElevenLabs with better error handling
 async function generateSpeech(text, voiceId, elevenLabsApiKey) {
   // Return null if no API key is provided
   if (!elevenLabsApiKey || elevenLabsApiKey.trim() === '') {
@@ -105,9 +105,9 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
         text,
         model_id: 'eleven_monolingual_v1',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5,
-          style: 0.0,
+          stability: 0.6,
+          similarity_boost: 0.8,
+          style: 0.2,
           use_speaker_boost: true
         }
       },
@@ -117,7 +117,8 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
           'Content-Type': 'application/json',
           'xi-api-key': elevenLabsApiKey,
         },
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        timeout: 30000
       }
     );
 
@@ -136,6 +137,14 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
     
     return null;
   }
+}
+
+// Calculate estimated audio duration (rough estimate: ~150 words per minute)
+function estimateAudioDuration(text) {
+  const words = text.split(' ').length;
+  const wordsPerMinute = 150;
+  const durationSeconds = (words / wordsPerMinute) * 60;
+  return Math.max(durationSeconds * 1000, 3000); // Minimum 3 seconds
 }
 
 // Process content and start conversation
@@ -173,7 +182,11 @@ Keep the analysis concise but comprehensive.`;
       topic: analysis,
       conversationHistory: [],
       participants: agents,
-      isActive: true
+      isActive: true,
+      currentSpeaker: null,
+      conversationQueue: [],
+      totalMessages: 0,
+      maxMessages: 20 // Limit for 5-15 minute conversation
     });
 
     res.json({ success: true, analysis });
@@ -206,7 +219,7 @@ io.on('connection', (socket) => {
       const openingAgent = agents[0]; // Dr. Chen
       const openingPrompt = `Based on this topic analysis: ${session.topic}
 
-Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make to start a conference discussion. Keep it engaging, professional, and around 2-3 sentences.`;
+Generate an engaging opening statement that Dr. Sarah Chen (Research Analyst) would make to start a conference discussion. Keep it professional, insightful, and around 3-4 sentences. Set the stage for a meaningful discussion.`;
 
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
       const response = await genAI.models.generateContent({
@@ -216,9 +229,12 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
 
       const message = response.text;
       session.conversationHistory.push(`${openingAgent.name}: ${message}`);
+      session.currentSpeaker = openingAgent.id;
+      session.totalMessages++;
 
       // Generate speech (will return null if no API key)
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
+      const audioDuration = estimateAudioDuration(message);
 
       // Emit to all users in the session
       io.to(sessionId).emit('agent-message', {
@@ -226,11 +242,14 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
         agentName: openingAgent.name,
         message,
         audio: audioBase64,
+        audioDuration,
         timestamp: new Date()
       });
 
-      // Start conversation loop
-      startConversationLoop(sessionId, geminiApiKey, elevenLabsApiKey);
+      // Start the synchronized conversation loop
+      setTimeout(() => {
+        startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
+      }, audioDuration + 2000); // Wait for audio to finish + 2 second pause
 
     } catch (error) {
       console.error('Conversation start error:', error);
@@ -257,29 +276,10 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
         timestamp: new Date()
       });
 
-      // Generate response from a random agent
-      const randomAgent = agents[Math.floor(Math.random() * agents.length)];
-      const response = await generateAgentResponse(
-        geminiApiKey,
-        randomAgent.id,
-        session.topic,
-        session.conversationHistory,
-        message
-      );
-
-      session.conversationHistory.push(`${randomAgent.name}: ${response}`);
-
-      // Generate speech (will return null if no API key)
-      const audioBase64 = await generateSpeech(response, randomAgent.voiceId, elevenLabsApiKey);
-
-      // Emit agent response
-      io.to(sessionId).emit('agent-message', {
-        agentId: randomAgent.id,
-        agentName: randomAgent.name,
-        message: response,
-        audio: audioBase64,
-        timestamp: new Date()
-      });
+      // Wait a moment then have an agent respond
+      setTimeout(async () => {
+        await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
+      }, 1500);
 
     } catch (error) {
       console.error('User message error:', error);
@@ -301,48 +301,76 @@ Generate an opening statement that Dr. Sarah Chen (Research Analyst) would make 
   });
 });
 
-// Conversation loop function
-async function startConversationLoop(sessionId, geminiApiKey, elevenLabsApiKey) {
+// Synchronized conversation function
+async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
-  if (!session || !session.isActive) return;
+  if (!session || !session.isActive || session.totalMessages >= session.maxMessages) {
+    return;
+  }
 
-  const interval = setInterval(async () => {
-    if (!session.isActive) {
-      clearInterval(interval);
-      return;
+  try {
+    await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey);
+  } catch (error) {
+    console.error('Synchronized conversation error:', error);
+  }
+}
+
+// Generate next agent response with proper synchronization
+async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
+  const session = sessions.get(sessionId);
+  if (!session || !session.isActive || session.totalMessages >= session.maxMessages) {
+    return;
+  }
+
+  try {
+    // Select next agent (avoid same agent speaking twice in a row)
+    const lastSpeaker = session.currentSpeaker;
+    const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
+    const nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
+
+    const response = await generateAgentResponse(
+      geminiApiKey,
+      nextAgent.id,
+      session.topic,
+      session.conversationHistory,
+      userInput
+    );
+
+    session.conversationHistory.push(`${nextAgent.name}: ${response}`);
+    session.currentSpeaker = nextAgent.id;
+    session.totalMessages++;
+
+    // Generate speech
+    const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
+    const audioDuration = estimateAudioDuration(response);
+
+    // Emit to all users in the session
+    io.to(sessionId).emit('agent-message', {
+      agentId: nextAgent.id,
+      agentName: nextAgent.name,
+      message: response,
+      audio: audioBase64,
+      audioDuration,
+      timestamp: new Date()
+    });
+
+    // Schedule next response after current audio finishes
+    if (session.totalMessages < session.maxMessages) {
+      setTimeout(() => {
+        startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
+      }, audioDuration + 3000); // Wait for audio + 3 second pause between speakers
+    } else {
+      // End conversation
+      setTimeout(() => {
+        io.to(sessionId).emit('conversation-ended', {
+          message: 'The AI conference discussion has concluded. Thank you for participating!'
+        });
+      }, audioDuration + 2000);
     }
 
-    try {
-      // Select next agent (avoid same agent speaking twice in a row)
-      const lastSpeaker = session.conversationHistory[session.conversationHistory.length - 1]?.split(':')[0];
-      const availableAgents = agents.filter(agent => agent.name !== lastSpeaker);
-      const nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
-
-      const response = await generateAgentResponse(
-        geminiApiKey,
-        nextAgent.id,
-        session.topic,
-        session.conversationHistory
-      );
-
-      session.conversationHistory.push(`${nextAgent.name}: ${response}`);
-
-      // Generate speech (will return null if no API key)
-      const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
-
-      // Emit to all users in the session
-      io.to(sessionId).emit('agent-message', {
-        agentId: nextAgent.id,
-        agentName: nextAgent.name,
-        message: response,
-        audio: audioBase64,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Conversation loop error:', error);
-    }
-  }, 8000); // Agent speaks every 8 seconds
+  } catch (error) {
+    console.error('Next agent response error:', error);
+  }
 }
 
 const PORT = process.env.PORT || 3001;
