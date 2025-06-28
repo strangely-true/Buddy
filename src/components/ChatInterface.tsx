@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, MicOff, MessageSquare, Settings } from 'lucide-react';
-import { aiService } from '../services/aiService';
+import { Send, Mic, MicOff, MessageSquare } from 'lucide-react';
+import io, { Socket } from 'socket.io-client';
 
 interface Message {
   id: string;
@@ -11,10 +11,16 @@ interface Message {
 }
 
 interface ChatInterfaceProps {
-  onApiKeySet?: (apiKey: string) => void;
+  sessionId: string;
+  geminiApiKey: string;
+  elevenLabsApiKey: string;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ onApiKeySet }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+  sessionId, 
+  geminiApiKey, 
+  elevenLabsApiKey 
+}) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -26,9 +32,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onApiKeySet }) => {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isRecording, setIsRecording] = useState(false);
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-  const [apiKey, setApiKey] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -39,33 +44,38 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onApiKeySet }) => {
     scrollToBottom();
   }, [messages]);
 
-  // Listen for AI agent responses
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const history = aiService.getConversationHistory();
-        const lastMessage = history[history.length - 1];
-        
-        if (lastMessage && !messages.find(m => m.content === lastMessage.split(': ')[1])) {
-          const [speaker, content] = lastMessage.split(': ');
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            content: content,
-            sender: speaker,
-            timestamp: new Date(),
-            type: 'ai'
-          }]);
-        }
-      } catch (error) {
-        // Silently handle errors
-      }
-    }, 2000);
+    // Initialize socket connection
+    const newSocket = io('http://localhost:3001');
+    setSocket(newSocket);
 
-    return () => clearInterval(interval);
-  }, [messages]);
+    // Join session
+    newSocket.emit('join-session', sessionId);
+
+    // Listen for agent messages
+    newSocket.on('agent-message', (data) => {
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        content: data.message,
+        sender: data.agentName,
+        timestamp: new Date(data.timestamp),
+        type: 'ai'
+      };
+      setMessages(prev => [...prev, aiMessage]);
+    });
+
+    // Listen for user messages (from other participants)
+    newSocket.on('user-message', (data) => {
+      // Don't add our own messages again
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [sessionId]);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isProcessing) return;
+    if (!inputValue.trim() || isProcessing || !socket) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -80,60 +90,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onApiKeySet }) => {
     setInputValue('');
     setIsProcessing(true);
 
-    try {
-      // Get response from a random AI agent
-      const agents = aiService.getAgents();
-      const randomAgent = agents[Math.floor(Math.random() * agents.length)];
-      
-      const response = await aiService.generateAgentResponse(
-        randomAgent.id, 
-        'User interaction', 
-        currentInput
-      );
+    // Send message to server
+    socket.emit('user-message', {
+      sessionId,
+      message: currentInput,
+      geminiApiKey,
+      elevenLabsApiKey
+    });
 
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        content: response,
-        sender: randomAgent.name,
-        timestamp: new Date(),
-        type: 'ai'
-      };
-
-      setMessages(prev => [...prev, aiResponse]);
-    } catch (error) {
-      console.error('Failed to get AI response:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "I'm having trouble connecting to the AI service. Please check your API key configuration.",
-        sender: 'System',
-        timestamp: new Date(),
-        type: 'system'
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsProcessing(false);
-    }
+    setIsProcessing(false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
-    }
-  };
-
-  const handleApiKeySubmit = () => {
-    if (apiKey.trim()) {
-      aiService.setApiKey(apiKey.trim());
-      onApiKeySet?.(apiKey.trim());
-      setShowApiKeyInput(false);
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        content: 'Gemini API key configured successfully! The AI agents are now ready for advanced conversations.',
-        sender: 'System',
-        timestamp: new Date(),
-        type: 'system'
-      }]);
     }
   };
 
@@ -146,45 +117,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onApiKeySet }) => {
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-slate-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <MessageSquare className="w-5 h-5 text-slate-600" />
-            <h3 className="font-medium text-slate-800">Chat & Questions</h3>
-          </div>
-          <button
-            onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-            className="p-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-            title="Configure API Key"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+        <div className="flex items-center space-x-2">
+          <MessageSquare className="w-5 h-5 text-slate-600" />
+          <h3 className="font-medium text-slate-800">Chat & Questions</h3>
         </div>
-        
-        {showApiKeyInput && (
-          <div className="mt-3 p-3 bg-slate-50 rounded-lg">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Gemini API Key
-            </label>
-            <div className="flex space-x-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your Gemini API key..."
-                className="flex-1 px-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={handleApiKeySubmit}
-                className="px-3 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Get your API key from Google AI Studio
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Messages */}

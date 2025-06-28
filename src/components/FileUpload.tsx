@@ -1,13 +1,20 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, File, Image, Type, Loader2, AlertCircle } from 'lucide-react';
-import { aiService } from '../services/aiService';
+import axios from 'axios';
 
 interface FileUploadProps {
-  onSessionStart: () => void;
+  onSessionStart: (sessionId: string) => void;
   isApiKeyConfigured: boolean;
+  geminiApiKey: string;
+  elevenLabsApiKey: string;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigured }) => {
+const FileUpload: React.FC<FileUploadProps> = ({ 
+  onSessionStart, 
+  isApiKeyConfigured, 
+  geminiApiKey,
+  elevenLabsApiKey 
+}) => {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [textPrompt, setTextPrompt] = useState('');
@@ -49,7 +56,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
     setError(null);
     
     try {
-      // Process the first file
       const file = files[0];
       const reader = new FileReader();
       
@@ -57,12 +63,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
         try {
           const content = e.target?.result as string;
           
-          // Extract text content based on file type
           let textContent = '';
           if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
             textContent = content;
           } else if (file.type === 'application/pdf') {
-            // For PDF files, we'll use a simplified approach
             textContent = `PDF Document: ${file.name}\nContent analysis will be performed by AI agents.`;
           } else if (file.type.startsWith('image/')) {
             textContent = `Image: ${file.name}\nVisual content will be analyzed and discussed by AI agents.`;
@@ -70,11 +74,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
             textContent = `Document: ${file.name}\nContent will be analyzed and discussed by AI agents.`;
           }
           
-          // Process content with Gemini
-          await aiService.processContent(textContent, 'document');
-          
-          setUploading(false);
-          onSessionStart();
+          await processContent(textContent, 'document');
         } catch (error) {
           console.error('File processing error:', error);
           setError('Failed to process file. Please check your API key configuration.');
@@ -85,11 +85,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
       if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
         reader.readAsText(file);
       } else {
-        // For other file types, we'll create a description
         const textContent = `File: ${file.name} (${file.type})\nSize: ${(file.size / 1024).toFixed(1)} KB\nThis content will be analyzed and discussed by AI agents.`;
-        await aiService.processContent(textContent, 'document');
-        setUploading(false);
-        onSessionStart();
+        await processContent(textContent, 'document');
       }
     } catch (error) {
       console.error('File handling error:', error);
@@ -110,12 +107,34 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
     setError(null);
     
     try {
-      await aiService.processContent(textPrompt, 'prompt');
-      setUploading(false);
-      onSessionStart();
+      await processContent(textPrompt, 'prompt');
     } catch (error) {
       console.error('Text processing error:', error);
       setError('Failed to process prompt. Please check your API key configuration.');
+      setUploading(false);
+    }
+  };
+
+  const processContent = async (content: string, type: string) => {
+    try {
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const response = await axios.post('http://localhost:3001/api/process-content', {
+        content,
+        type,
+        sessionId,
+        geminiApiKey
+      });
+
+      if (response.data.success) {
+        setUploading(false);
+        onSessionStart(sessionId);
+      } else {
+        throw new Error('Failed to process content');
+      }
+    } catch (error) {
+      console.error('Content processing error:', error);
+      setError('Failed to process content. Please check your API key and try again.');
       setUploading(false);
     }
   };
@@ -128,9 +147,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
           <div>
             <h4 className="text-red-800 font-medium">Error</h4>
             <p className="text-red-700 text-sm mt-1">{error}</p>
-            <p className="text-red-600 text-xs mt-2">
-              Make sure to configure your Gemini API key in the chat settings.
-            </p>
           </div>
         </div>
       )}
@@ -173,7 +189,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
             <p className={`mb-6 ${isApiKeyConfigured ? 'text-slate-600' : 'text-slate-400'}`}>
               {isApiKeyConfigured 
                 ? 'Drag and drop files here, or click to browse'
-                : 'Configure your Gemini API key to upload files'
+                : 'Configure your API keys to upload files'
               }
             </p>
             <div className={`flex items-center justify-center space-x-6 text-sm ${isApiKeyConfigured ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -214,7 +230,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onSessionStart, isApiKeyConfigu
               onChange={(e) => setTextPrompt(e.target.value)}
               placeholder={isApiKeyConfigured 
                 ? "Describe a topic you'd like the AI agents to discuss..."
-                : "Configure your Gemini API key to start a conversation..."
+                : "Configure your API keys to start a conversation..."
               }
               className="w-full h-32 p-4 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
               disabled={uploading || !isApiKeyConfigured}

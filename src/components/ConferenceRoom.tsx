@@ -1,77 +1,100 @@
 import React, { useState, useEffect } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Users, Phone, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, Users, PhoneOff } from 'lucide-react';
 import AIParticipant from './AIParticipant';
-import { aiService } from '../services/aiService';
+import io, { Socket } from 'socket.io-client';
 
 interface ConferenceRoomProps {
   onEndCall: () => void;
+  sessionId: string;
+  geminiApiKey: string;
+  elevenLabsApiKey: string;
 }
 
-const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ onEndCall }) => {
+const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ 
+  onEndCall, 
+  sessionId, 
+  geminiApiKey, 
+  elevenLabsApiKey 
+}) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [activeParticipant, setActiveParticipant] = useState<number | null>(null);
-  const [currentTopic, setCurrentTopic] = useState('Analyzing your content and preparing discussion...');
+  const [activeParticipant, setActiveParticipant] = useState<string | null>(null);
+  const [currentTopic, setCurrentTopic] = useState('Preparing AI conference...');
   const [isCallActive, setIsCallActive] = useState(true);
-  const [conversationStarted, setConversationStarted] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const participants = [
-    { id: 1, name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800', agentId: 'chen' },
-    { id: 2, name: 'Marcus Thompson', role: 'Strategy Expert', avatar: '👨‍💼', color: 'bg-blue-100 text-blue-800', agentId: 'thompson' },
-    { id: 3, name: 'Prof. Elena Rodriguez', role: 'Domain Specialist', avatar: '👩‍🏫', color: 'bg-green-100 text-green-800', agentId: 'rodriguez' },
-    { id: 4, name: 'Alex Kim', role: 'Innovation Lead', avatar: '👨‍💻', color: 'bg-orange-100 text-orange-800', agentId: 'kim' },
+    { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
+    { id: 'thompson', name: 'Marcus Thompson', role: 'Strategy Expert', avatar: '👨‍💼', color: 'bg-blue-100 text-blue-800' },
+    { id: 'rodriguez', name: 'Prof. Elena Rodriguez', role: 'Domain Specialist', avatar: '👩‍🏫', color: 'bg-green-100 text-green-800' },
+    { id: 'kim', name: 'Alex Kim', role: 'Innovation Lead', avatar: '👨‍💻', color: 'bg-orange-100 text-orange-800' },
   ];
 
-  // Start conversation after component mounts
   useEffect(() => {
-    const startConversation = async () => {
-      try {
-        const starter = await aiService.generateConversationStarter();
-        setCurrentTopic('AI Conference Discussion in Progress');
-        setConversationStarted(true);
-        
-        // Start the conversation flow
-        setTimeout(() => {
-          setActiveParticipant(0); // Dr. Chen starts
-        }, 1000);
-      } catch (error) {
-        console.error('Failed to start conversation:', error);
-        setCurrentTopic('Discussion ready - waiting for participants');
-      }
-    };
+    // Initialize socket connection
+    const newSocket = io('http://localhost:3001');
+    setSocket(newSocket);
 
-    if (!conversationStarted) {
-      startConversation();
-    }
-  }, [conversationStarted]);
+    // Join session
+    newSocket.emit('join-session', sessionId);
 
-  // Simulate conversation flow between AI agents
-  useEffect(() => {
-    if (!conversationStarted || !isCallActive) return;
-
-    const interval = setInterval(async () => {
-      const nextParticipant = Math.floor(Math.random() * participants.length);
-      setActiveParticipant(nextParticipant);
+    // Listen for agent messages
+    newSocket.on('agent-message', (data) => {
+      setActiveParticipant(data.agentId);
+      setCurrentTopic('AI Conference Discussion in Progress');
       
-      try {
-        const participant = participants[nextParticipant];
-        await aiService.generateAgentResponse(participant.agentId, currentTopic);
-      } catch (error) {
-        console.error('Failed to generate agent response:', error);
+      // Play audio if available and speaker is on
+      if (data.audio && isSpeakerOn) {
+        playAudio(data.audio);
       }
 
       // Clear active participant after speaking
       setTimeout(() => {
         setActiveParticipant(null);
-      }, 3000);
-    }, 6000);
+      }, 4000);
+    });
 
-    return () => clearInterval(interval);
-  }, [conversationStarted, isCallActive, currentTopic, participants]);
+    // Listen for session end
+    newSocket.on('session-ended', () => {
+      setIsCallActive(false);
+    });
+
+    // Start conversation
+    newSocket.emit('start-conversation', {
+      sessionId,
+      geminiApiKey,
+      elevenLabsApiKey
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [sessionId, geminiApiKey, elevenLabsApiKey, isSpeakerOn]);
+
+  const playAudio = (audioBase64: string) => {
+    try {
+      const audioBlob = new Blob([Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      audio.play().catch(error => {
+        console.error('Audio playback error:', error);
+      });
+    } catch (error) {
+      console.error('Audio processing error:', error);
+    }
+  };
 
   const handleEndCall = () => {
     setIsCallActive(false);
-    aiService.clearConversation();
+    if (socket) {
+      socket.emit('end-session', sessionId);
+      socket.disconnect();
+    }
     onEndCall();
   };
 
@@ -129,12 +152,12 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ onEndCall }) => {
       {/* Participants Grid */}
       <div className="flex-1 p-6">
         <div className="grid grid-cols-2 gap-4 h-full">
-          {participants.map((participant, index) => (
+          {participants.map((participant) => (
             <AIParticipant
               key={participant.id}
               participant={participant}
-              isActive={activeParticipant === index}
-              isSpeaking={activeParticipant === index}
+              isActive={activeParticipant === participant.id}
+              isSpeaking={activeParticipant === participant.id}
             />
           ))}
         </div>
@@ -147,11 +170,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ onEndCall }) => {
           <p className="text-lg font-medium text-slate-800">
             {currentTopic}
           </p>
-          {!conversationStarted && (
+          {currentTopic === 'Preparing AI conference...' && (
             <div className="mt-2">
               <div className="inline-flex items-center space-x-2 text-sm text-slate-500">
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>Preparing AI agents...</span>
+                <span>Starting conversation...</span>
               </div>
             </div>
           )}
