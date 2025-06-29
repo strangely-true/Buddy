@@ -53,69 +53,33 @@ const FileUpload: React.FC<FileUploadProps> = ({
       return;
     }
     
-    setUploadedFiles(prev => [...prev, ...files]);
-    setError(null);
+    // Filter supported file types
+    const supportedFiles = files.filter(file => {
+      const isText = file.type.startsWith('text/') || 
+                    file.name.endsWith('.txt') || 
+                    file.name.endsWith('.md') ||
+                    file.name.endsWith('.csv') ||
+                    file.name.endsWith('.json');
+      const isImage = file.type.startsWith('image/') && 
+                     (file.type.includes('jpeg') || 
+                      file.type.includes('jpg') || 
+                      file.type.includes('png') || 
+                      file.type.includes('webp'));
+      return isText || isImage;
+    });
+
+    if (supportedFiles.length !== files.length) {
+      setError('Some files were skipped. Only text files (.txt, .md, .csv, .json) and images (.jpg, .png, .webp) are supported.');
+    } else {
+      setError(null);
+    }
+    
+    setUploadedFiles(prev => [...prev, ...supportedFiles]);
   };
 
   const removeFile = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = async () => {
-    if (!textPrompt.trim() && uploadedFiles.length === 0) return;
-    
-    if (!isApiKeyConfigured) {
-      setError('Please configure your Gemini API key before starting a discussion.');
-      return;
-    }
-    
-    setUploading(true);
     setError(null);
-    
-    try {
-      let content = textPrompt.trim();
-      
-      // Process uploaded files
-      if (uploadedFiles.length > 0) {
-        const fileDescriptions = await Promise.all(
-          uploadedFiles.map(async (file) => {
-            if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
-              const text = await file.text();
-              return `File: ${file.name}\nContent: ${text}`;
-            } else if (file.type.startsWith('image/')) {
-              // For images, we'll use Gemini's vision capabilities
-              const base64 = await fileToBase64(file);
-              return {
-                type: 'image',
-                name: file.name,
-                data: base64,
-                mimeType: file.type
-              };
-            } else {
-              return `File: ${file.name} (${file.type}) - ${(file.size / 1024).toFixed(1)} KB`;
-            }
-          })
-        );
-
-        const textFiles = fileDescriptions.filter(desc => typeof desc === 'string');
-        const imageFiles = fileDescriptions.filter(desc => typeof desc === 'object');
-
-        if (textFiles.length > 0) {
-          content += '\n\nUploaded Documents:\n' + textFiles.join('\n\n');
-        }
-
-        // For images, we'll include them in the multimodal request
-        if (imageFiles.length > 0) {
-          content += `\n\nUploaded Images: ${imageFiles.map(img => img.name).join(', ')}`;
-        }
-      }
-
-      await processContent(content, uploadedFiles);
-    } catch (error) {
-      console.error('Processing error:', error);
-      setError('Failed to process content. Please check your API key configuration.');
-      setUploading(false);
-    }
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -130,44 +94,114 @@ const FileUpload: React.FC<FileUploadProps> = ({
     });
   };
 
-  const processContent = async (content: string, files: File[]) => {
+  const readTextFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsText(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const handleSubmit = async () => {
+    if (!textPrompt.trim() && uploadedFiles.length === 0) {
+      setError('Please enter a topic or upload files to start the discussion.');
+      return;
+    }
+    
+    if (!isApiKeyConfigured) {
+      setError('Please configure your Gemini API key before starting a discussion.');
+      return;
+    }
+    
+    setUploading(true);
+    setError(null);
+    
     try {
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      // Prepare multimodal content for Gemini
-      const multimodalContent = {
-        text: content,
-        images: []
-      };
+      let content = textPrompt.trim();
+      const images: any[] = [];
+      
+      // Process uploaded files
+      if (uploadedFiles.length > 0) {
+        const textContents: string[] = [];
+        
+        for (const file of uploadedFiles) {
+          if (file.type.startsWith('image/')) {
+            // Handle images for multimodal input
+            try {
+              const base64 = await fileToBase64(file);
+              images.push({
+                name: file.name,
+                data: base64,
+                mimeType: file.type
+              });
+            } catch (error) {
+              console.error('Error processing image:', file.name, error);
+              setError(`Failed to process image: ${file.name}`);
+              setUploading(false);
+              return;
+            }
+          } else {
+            // Handle text files
+            try {
+              const text = await readTextFile(file);
+              textContents.push(`File: ${file.name}\nContent:\n${text}\n`);
+            } catch (error) {
+              console.error('Error reading text file:', file.name, error);
+              setError(`Failed to read file: ${file.name}`);
+              setUploading(false);
+              return;
+            }
+          }
+        }
 
-      // Process image files for multimodal input
-      for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          const base64 = await fileToBase64(file);
-          multimodalContent.images.push({
-            name: file.name,
-            data: base64,
-            mimeType: file.type
-          });
+        // Add text file contents to the main content
+        if (textContents.length > 0) {
+          content += '\n\nUploaded Documents:\n' + textContents.join('\n');
+        }
+
+        // Add image descriptions
+        if (images.length > 0) {
+          content += `\n\nUploaded Images: ${images.map(img => img.name).join(', ')}`;
         }
       }
 
+      // Prepare content for API
+      const requestContent = images.length > 0 ? {
+        text: content,
+        images: images
+      } : content;
+
+      console.log('Sending content to API:', { 
+        hasImages: images.length > 0, 
+        textLength: content.length,
+        imageCount: images.length 
+      });
+
       const response = await axios.post('http://localhost:3001/api/process-content', {
-        content: multimodalContent,
-        type: files.length > 0 ? 'multimodal' : 'text prompt',
+        content: requestContent,
+        type: images.length > 0 ? 'multimodal' : 'text',
         sessionId,
         geminiApiKey
       });
 
       if (response.data.success) {
+        console.log('Content processed successfully');
         setUploading(false);
         onSessionStart(sessionId);
       } else {
-        throw new Error('Failed to process content');
+        throw new Error(response.data.error || 'Failed to process content');
       }
     } catch (error) {
       console.error('Content processing error:', error);
-      setError('Failed to process content. Please check your API key and try again.');
+      if (axios.isAxiosError(error)) {
+        const errorMessage = error.response?.data?.error || error.message;
+        setError(`Failed to process content: ${errorMessage}`);
+      } else {
+        setError('Failed to process content. Please check your API key and try again.');
+      }
       setUploading(false);
     }
   };
@@ -203,7 +237,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <input
             type="file"
             multiple
-            accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.webp,.csv,.json"
+            accept=".txt,.md,.csv,.json,.jpg,.jpeg,.png,.webp"
             onChange={handleFileInput}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             disabled={uploading || !isApiKeyConfigured}
@@ -219,13 +253,16 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <div className={`flex items-center justify-center space-x-4 text-xs mt-2 ${isApiKeyConfigured ? 'text-slate-500' : 'text-slate-400'}`}>
             <div className="flex items-center space-x-1">
               <File className="w-3 h-3" />
-              <span>Documents</span>
+              <span>Text Files</span>
             </div>
             <div className="flex items-center space-x-1">
               <Image className="w-3 h-3" />
               <span>Images</span>
             </div>
           </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Supported: .txt, .md, .csv, .json, .jpg, .png, .webp
+          </p>
         </div>
 
         {/* Uploaded Files Display */}
@@ -247,6 +284,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
                   <button
                     onClick={() => removeFile(index)}
                     className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+                    disabled={uploading}
                   >
                     <X className="w-4 h-4" />
                   </button>
