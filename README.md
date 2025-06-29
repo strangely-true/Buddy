@@ -1,170 +1,216 @@
 # Buddy - AI Conference Platform
 
-A modern AI-powered conference platform where expert AI agents discuss and analyze your content in real-time.
+A real-time AI conference platform where specialized AI agents discuss and analyze your content in an interactive conversation. Born from the limitations of static AI tools and the desire for more collaborative AI experiences.
 
-## 🚀 Features
+## ✨ Features
 
-- **AI Expert Panel**: Four specialized AI agents with distinct personalities and expertise
-- **File Upload**: Support for documents and images with multimodal AI analysis
-- **Real-time Discussion**: Live AI conversations with voice synthesis
-- **Interactive Chat**: Join the discussion with questions and clarifications
-- **Customizable Personalities**: Configure AI agent behaviors and expertise
-- **Dark Mode Design**: Modern, sleek interface with beautiful animations
+- **Expert AI Panel**: Four specialized AI agents with distinct personalities and expertise areas
+- **Real-time Voice Conversations**: AI agents speak with unique voices using ElevenLabs
+- **Interactive Participation**: Join the discussion with questions and get responses from relevant experts
+- **Content Analysis**: Upload documents or provide topics for focused AI discussions
+- **Live Conference Room**: Visual representation of speaking agents with real-time updates
+- **Session Management**: Persistent conversation history and session tracking
+- **Modern UI**: Beautiful dark mode interface with responsive design
+
+## 🤖 Meet the AI Experts
+
+- **Dr. Sarah Chen** - Research Analyst: Methodical, evidence-based approach with focus on data validity
+- **Marcus Thompson** - Strategy Expert: Pragmatic, results-oriented with real-world implementation focus  
+- **Prof. Elena Rodriguez** - Domain Specialist: Theoretical depth with historical and contextual perspective
+- **Alex Kim** - Innovation Lead: Forward-thinking, challenges conventional wisdom with emerging trends
+
+## 🛠️ Technologies Used
+
+**Frontend:**
+- React, Vite, Tailwind CSS, Lucide React, Socket.IO Client
+
+**Backend:**
+- Node.js, Express.js, Socket.IO, CORS, dotenv
+
+**AI & APIs:**
+- Google Gemini 2.0 Flash, @google/genai, ElevenLabs API, Axios
+
+**Database:**
+- Supabase
+
+**Deployment:**
+- Netlify (Frontend), Render (Backend)
 
 ## 🏗️ Architecture
 
-This application consists of two parts:
+This application consists of two main components:
 
 ### Frontend (React + Vite)
-- Modern React application with TypeScript
+- Modern React application with TypeScript support
 - Real-time communication via Socket.IO
-- File upload and processing
-- Voice synthesis integration
-- Responsive dark mode design
+- File upload and content processing
+- Voice audio playback and management
+- Responsive dark mode design with Tailwind CSS
+- API key management (stored locally, never sent to backend)
 
 ### Backend (Node.js + Express)
-- Express server with Socket.IO for real-time communication
-- Google Gemini AI integration for content analysis
-- ElevenLabs integration for voice synthesis
-- Session management and conversation handling
+- Express server with Socket.IO for WebSocket connections
+- Google Gemini integration for AI content generation
+- ElevenLabs integration for text-to-speech synthesis
+- Session management and conversation orchestration
+- CORS configured for production deployment
+- Health check endpoints for monitoring
 
-## 🚀 Deployment Guide
+## 🚀 Quick Start
 
-### 1. Deploy the Backend
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
+- Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- ElevenLabs API key from [ElevenLabs](https://elevenlabs.io/) (optional, for voice synthesis)
 
-The backend needs to be deployed to a service that supports Node.js and WebSocket connections:
+### Installation & Setup
 
-#### Option A: Heroku
+1. **Clone the repository**
 ```bash
-# In the project root
-git init
-git add .
-git commit -m "Initial commit"
-
-# Create Heroku app
-heroku create your-app-name-backend
-
-# Set environment variables
-heroku config:set NODE_ENV=production
-
-# Deploy
-git push heroku main
+git clone <your-repo-url>
+cd Buddy
 ```
 
-#### Option B: Railway
-1. Connect your GitHub repository to Railway
-2. Select the root directory for deployment
-3. Railway will automatically detect the Node.js app
-4. Set environment variables in the Railway dashboard
-
-#### Option C: Render
-1. Create a new Web Service on Render
-2. Connect your GitHub repository
-3. Set build command: `npm install`
-4. Set start command: `npm run server`
-5. Add environment variables
-
-### 2. Update Frontend Configuration
-
-After deploying the backend, update the API configuration:
-
-1. Open `src/config/api.ts`
-2. Replace `'https://your-backend-url.herokuapp.com'` with your actual backend URL
-3. Example:
-```typescript
-export const API_CONFIG = {
-  BASE_URL: isDevelopment 
-    ? 'http://localhost:3001' 
-    : 'https://your-app-name-backend.herokuapp.com', // Your actual backend URL
-  // ...
-};
+2. **Install dependencies**
+```bash
+npm install
 ```
 
-### 3. Deploy the Frontend
-
-The frontend is automatically deployed to Netlify when you push changes. The current deployment is at:
-https://curious-cobbler-87bad4.netlify.app
-
-## 🔧 Environment Variables
-
-### Backend (.env)
-```
-NODE_ENV=production
+3. **Set up environment variables**
+Create a `.env` file in the `server` directory:
+```env
+NODE_ENV=development
 PORT=3001
 ```
 
-### Frontend
-No environment variables needed - API keys are configured in the UI and stored locally.
-
-## 🛠️ Local Development
-
-### Prerequisites
-- Node.js 18+
-- npm or yarn
-
-### Setup
+4. **Start development servers**
 ```bash
-# Install dependencies
-npm install
-
-# Start development (both frontend and backend)
+# Start both frontend and backend
 npm run dev
 
 # Or start individually:
-npm run client  # Frontend only
-npm run server  # Backend only
+npm run client  # Frontend (port 5173)
+npm run server  # Backend (port 3001)
 ```
 
-### API Keys Required
-- **Gemini API Key**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
-- **ElevenLabs API Key** (Optional): Get from [ElevenLabs](https://elevenlabs.io/app/settings/api-keys)
+5. **Configure API keys in the app**
+- Open the application in your browser (http://localhost:5173)
+- Click the settings icon to add your API keys
+- Keys are stored locally and never sent to the backend
+
+## 🌐 Deployment
+
+### Frontend (Netlify)
+The frontend is configured for automatic deployment to Netlify:
+- Connect your GitHub repository to Netlify
+- Build command: `npm run build`
+- Publish directory: `dist`
+- Current deployment: https://curious-cobbler-87bad4.netlify.app
+
+### Backend (Render)
+1. Create a new Web Service on Render
+2. Connect your GitHub repository
+3. Root directory: `server`
+4. Build command: `npm install`
+5. Start command: `node index.js`
+6. Set environment variables:
+   ```
+   NODE_ENV=production
+   PORT=10000
+   ```
+
+### Database (Supabase)
+- Create a new Supabase project
+- Run the migration files in the `supabase/migrations` folder
+- Configure Row Level Security (RLS) policies as needed
 
 ## 📁 Project Structure
 
 ```
 ├── src/                    # Frontend React application
 │   ├── components/         # React components
+│   │   ├── AIParticipant.tsx
+│   │   ├── ApiKeyModal.tsx
+│   │   ├── ChatInterface.tsx
+│   │   ├── ConferenceRoom.tsx
+│   │   ├── FileUpload.tsx
+│   │   └── Header.tsx
 │   ├── config/            # API configuration
+│   ├── hooks/             # Custom React hooks
+│   ├── services/          # API services
 │   └── ...
 ├── server/                # Backend Node.js application
-│   └── index.js          # Express server with Socket.IO
+│   ├── index.js          # Express server with Socket.IO
+│   └── package.json      # Server dependencies
+├── supabase/             # Database migrations
+│   └── migrations/
 ├── dist/                 # Built frontend files
-└── package.json          # Dependencies and scripts
+└── package.json          # Root dependencies and scripts
 ```
-
-## 🔌 API Endpoints
-
-### Backend Endpoints
-- `POST /api/process-content` - Process uploaded content and start AI analysis
-- WebSocket connection for real-time AI conversation
-
-### Frontend Configuration
-- Automatically switches between localhost (development) and deployed backend (production)
-- Graceful error handling for backend connectivity issues
 
 ## 🎯 Usage
 
-1. **Configure API Keys**: Click the settings icon to add your Gemini API key
-2. **Upload Content**: Add documents or images, or enter a discussion topic
-3. **Start Discussion**: AI experts will analyze and discuss your content
-4. **Interact**: Join the conversation through the chat interface
-5. **Customize**: Configure AI personalities for different discussion styles
+1. **Start the Application**: Run `npm run dev` for development
+2. **Configure API Keys**: Click the settings icon and add your Gemini API key (ElevenLabs optional)
+3. **Upload Content**: Add documents, images, or enter a discussion topic
+4. **Start Discussion**: AI experts will begin analyzing and discussing your content
+5. **Participate**: Use the chat interface to ask questions and join the conversation
+6. **Listen**: Each AI agent speaks with a unique voice (if ElevenLabs is configured)
+
+## 🔧 Configuration
+
+### API Keys
+- **Gemini API Key**: Required for AI content generation
+- **ElevenLabs API Key**: Optional, enables voice synthesis for AI agents
+- Keys are stored in browser localStorage and passed to backend per request
+
+### AI Agents
+The system includes four pre-configured AI experts, each with:
+- Unique personality and expertise area
+- Specific voice ID for ElevenLabs synthesis
+- Weighted selection algorithm for relevant responses
+- Conversation context awareness
 
 ## 🚨 Troubleshooting
 
-### Backend Connection Issues
-- Ensure the backend is deployed and accessible
-- Check the API_CONFIG.BASE_URL in `src/config/api.ts`
-- Verify WebSocket connections are supported by your hosting provider
+### Common Issues
 
-### API Key Issues
-- Ensure Gemini API key is valid and has sufficient quota
-- ElevenLabs key is optional - the app works without voice synthesis
+**Backend Connection Problems**
+- Verify the backend is running on the correct port (3001 for development)
+- Check CORS configuration in `server/index.js`
+- Ensure WebSocket connections are supported by your hosting provider
 
-### File Upload Issues
-- Check file size limits (10MB max)
-- Ensure file types are supported (text files and images)
-- Files are processed locally if no API key is configured
+**API Key Issues**
+- Verify your Gemini API key is valid and has quota remaining
+- ElevenLabs key is optional - the app works with text-only responses
+- Keys are case-sensitive and should not include extra spaces
+
+**File Upload Problems**
+- Maximum file size is 10MB
+- Supported formats: text files, PDFs, images
+- Files are processed in the browser, not sent to external servers
+
+**Audio Playback Issues**
+- Ensure ElevenLabs API key is configured correctly
+- Check browser audio permissions
+- Audio files are streamed in real-time during conversations
+
+## 🎨 The Story Behind Buddy
+
+The inspiration for "Buddy" came from two main sources: the limitations I felt with NotebookLM's static nature and, honestly, just feeling lonely. NotebookLM is amazing at generating podcast-style discussions, but you can't really interact with it - you're just a passive listener. I wanted something where I could jump into the conversation, ask questions, and actually participate in the discussion. Plus, when you're coding alone for hours, having AI experts "discuss" your ideas feels less isolating than just chatting with a single chatbot.
+
+This project was a real eye-opener about how powerful AI has become and how much of a game-changer it's going to be in the coming years. The architecture evolved organically through pure vibe-coding - starting with a simple idea and building features as inspiration struck.
+
+At its core, Buddy solved a personal problem - the isolation of working alone on complex ideas. Instead of just having one AI assistant, I created a whole panel of experts who could discuss, debate, and build on each other's ideas. It's like having a team of consultants available 24/7, but they're actually engaging with each other, not just responding to me.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
 
