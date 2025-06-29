@@ -20,6 +20,18 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+// Enhanced logging function
+function log(level, message, data = null) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+  
+  if (data) {
+    console.log(logMessage, data);
+  } else {
+    console.log(logMessage);
+  }
+}
+
 // Store active sessions
 const sessions = new Map();
 
@@ -149,14 +161,20 @@ Stay strictly within the topic boundaries. Challenge other experts by introducin
 
 // Generate AI response with DISTINCT personality-driven prompts
 async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null) {
-  const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
-  const agent = agents.find(a => a.id === agentId);
+  log('info', `Generating response for agent: ${agentId}`, { userInput, historyLength: conversationHistory.length });
   
-  if (!agent) throw new Error('Agent not found');
+  try {
+    const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
+    const agent = agents.find(a => a.id === agentId);
+    
+    if (!agent) {
+      log('error', `Agent not found: ${agentId}`);
+      throw new Error('Agent not found');
+    }
 
-  const conversationContext = conversationHistory.slice(-6).join('\n');
-  
-  const prompt = `${agent.systemPrompt}
+    const conversationContext = conversationHistory.slice(-6).join('\n');
+    
+    const prompt = `${agent.systemPrompt}
 
 CURRENT DISCUSSION TOPIC AND BOUNDARIES:
 ${context}
@@ -177,22 +195,30 @@ CRITICAL REQUIREMENTS:
 
 Your response as ${agent.name}:`;
 
-  const response = await genAI.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: prompt,
-  });
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+    });
 
-  return response.text;
+    const responseText = response.text;
+    log('info', `Generated response for ${agent.name}`, { responseLength: responseText.length });
+    return responseText;
+  } catch (error) {
+    log('error', `Error generating agent response for ${agentId}`, error);
+    throw error;
+  }
 }
 
 // Generate speech using ElevenLabs
 async function generateSpeech(text, voiceId, elevenLabsApiKey) {
   if (!elevenLabsApiKey || elevenLabsApiKey.trim() === '') {
-    console.log('ElevenLabs API key not provided, skipping speech generation');
+    log('info', 'ElevenLabs API key not provided, skipping speech generation');
     return null;
   }
 
   try {
+    log('info', `Generating speech for voice: ${voiceId}`, { textLength: text.length });
+    
     const response = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
@@ -216,9 +242,10 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
       }
     );
 
+    log('info', 'Speech generation successful');
     return Buffer.from(response.data).toString('base64');
   } catch (error) {
-    console.error('ElevenLabs API error:', error.response?.status, error.response?.statusText);
+    log('error', 'ElevenLabs API error', { status: error.response?.status, statusText: error.response?.statusText });
     return null;
   }
 }
@@ -235,9 +262,16 @@ function estimateAudioDuration(text) {
 app.post('/api/process-content', async (req, res) => {
   try {
     const { content, type, sessionId, geminiApiKey, userId } = req.body;
+    log('info', 'Processing content request', { sessionId, type, userId, contentLength: content?.length });
     
     if (!geminiApiKey) {
+      log('error', 'Gemini API key missing');
       return res.status(400).json({ error: 'Gemini API key required' });
+    }
+
+    if (!content || !content.trim()) {
+      log('error', 'Content is empty');
+      return res.status(400).json({ error: 'Content is required' });
     }
 
     const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
@@ -257,19 +291,21 @@ CRITICAL: The experts must stay strictly within this topic scope and not deviate
 
 Time limit: 5-15 minutes of focused expert discussion.`;
 
+    log('info', 'Sending content to Gemini for analysis');
     const response = await genAI.models.generateContent({
       model: "gemini-2.0-flash",
       contents: analysisPrompt,
     });
 
     const analysis = response.text;
+    log('info', 'Content analysis completed', { analysisLength: analysis.length });
 
     // Store session data with proper initialization
-    sessions.set(sessionId, {
+    const sessionData = {
       topic: analysis,
       conversationHistory: [],
       participants: agents,
-      isActive: false, // Start as false, will be set to true when conversation starts
+      isActive: false, // Will be set to true when conversation starts
       isPaused: false,
       currentSpeaker: null,
       totalMessages: 0,
@@ -279,31 +315,58 @@ Time limit: 5-15 minutes of focused expert discussion.`;
       startTime: null, // Will be set when conversation actually starts
       maxDuration: 15 * 60 * 1000,
       userId: userId,
-      status: 'prepared' // New status to track session state
-    });
+      status: 'prepared', // prepared -> active -> ended
+      createdAt: Date.now()
+    };
+
+    sessions.set(sessionId, sessionData);
+    log('info', 'Session created successfully', { sessionId, status: sessionData.status });
 
     res.json({ success: true, analysis });
   } catch (error) {
-    console.error('Content processing error:', error);
+    log('error', 'Content processing error', error);
     res.status(500).json({ error: 'Failed to process content' });
   }
 });
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  log('info', `User connected: ${socket.id}`);
 
   socket.on('join-session', (sessionId) => {
     socket.join(sessionId);
-    console.log(`User ${socket.id} joined session ${sessionId}`);
+    log('info', `User ${socket.id} joined session ${sessionId}`);
+    
+    // Send session status to client
+    const session = sessions.get(sessionId);
+    if (session) {
+      socket.emit('session-status', { 
+        status: session.status, 
+        isActive: session.isActive,
+        totalMessages: session.totalMessages 
+      });
+      log('info', `Sent session status to client`, { sessionId, status: session.status });
+    } else {
+      log('warn', `Session not found when joining: ${sessionId}`);
+      socket.emit('error', 'Session not found');
+    }
   });
 
   socket.on('start-conversation', async (data) => {
     const { sessionId, geminiApiKey, elevenLabsApiKey, userId } = data;
+    log('info', 'Starting conversation', { sessionId, userId });
+    
     const session = sessions.get(sessionId);
     
     if (!session) {
+      log('error', `Session not found for start-conversation: ${sessionId}`);
       socket.emit('error', 'Session not found');
+      return;
+    }
+
+    if (session.status === 'ended') {
+      log('warn', `Attempted to start ended session: ${sessionId}`);
+      socket.emit('error', 'Session has ended');
       return;
     }
 
@@ -311,6 +374,7 @@ io.on('connection', (socket) => {
     session.isActive = true;
     session.startTime = Date.now();
     session.status = 'active';
+    log('info', 'Session activated', { sessionId, startTime: session.startTime });
 
     try {
       const openingAgent = agents[0]; // Dr. Chen
@@ -329,6 +393,7 @@ This is the opening of a focused 5-15 minute expert discussion. Stay strictly wi
 
 Your opening statement:`;
 
+      log('info', 'Generating opening statement');
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
       const response = await genAI.models.generateContent({
         model: "gemini-2.0-flash",
@@ -340,9 +405,12 @@ Your opening statement:`;
       session.currentSpeaker = openingAgent.id;
       session.totalMessages++;
 
+      log('info', 'Opening statement generated', { agentName: openingAgent.name, messageLength: message.length });
+
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
       const audioDuration = estimateAudioDuration(message);
 
+      // Emit to all clients in the session
       io.to(sessionId).emit('agent-message', {
         agentId: openingAgent.id,
         agentName: openingAgent.name,
@@ -352,22 +420,29 @@ Your opening statement:`;
         timestamp: new Date()
       });
 
+      log('info', 'Opening message sent to clients', { sessionId, audioDuration });
+
       // Schedule next response
       session.nextTimeout = setTimeout(() => {
+        log('info', 'Starting synchronized conversation flow');
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + 2000);
 
     } catch (error) {
-      console.error('Conversation start error:', error);
+      log('error', 'Conversation start error', error);
+      session.status = 'error';
       socket.emit('error', 'Failed to start conversation');
     }
   });
 
   socket.on('user-message', async (data) => {
     const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
+    log('info', 'User message received', { sessionId, messageLength: message?.length });
+    
     const session = sessions.get(sessionId);
     
     if (!session || !session.isActive) {
+      log('warn', 'User message sent to inactive session', { sessionId, sessionExists: !!session, isActive: session?.isActive });
       socket.emit('error', 'Session not found or not active');
       return;
     }
@@ -377,22 +452,25 @@ Your opening statement:`;
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
         session.nextTimeout = null;
+        log('info', 'Cleared pending timeout for user message');
       }
 
       session.conversationHistory.push(`User: ${message}`);
 
       // Schedule agent response
       session.nextTimeout = setTimeout(async () => {
+        log('info', 'Generating agent response to user message');
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
       }, 1500);
 
     } catch (error) {
-      console.error('User message error:', error);
+      log('error', 'User message error', error);
       socket.emit('error', 'Failed to process message');
     }
   });
 
   socket.on('pause-conversation', (sessionId) => {
+    log('info', 'Pause conversation requested', { sessionId });
     const session = sessions.get(sessionId);
     if (session && session.isActive) {
       session.isPaused = true;
@@ -401,10 +479,12 @@ Your opening statement:`;
         session.nextTimeout = null;
       }
       io.to(sessionId).emit('conversation-paused');
+      log('info', 'Conversation paused', { sessionId });
     }
   });
 
   socket.on('resume-conversation', (sessionId) => {
+    log('info', 'Resume conversation requested', { sessionId });
     const session = sessions.get(sessionId);
     if (session && session.isActive) {
       session.isPaused = false;
@@ -412,12 +492,15 @@ Your opening statement:`;
       
       // Resume conversation flow
       session.nextTimeout = setTimeout(() => {
+        log('info', 'Resuming conversation flow');
         startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
       }, 1500);
+      log('info', 'Conversation resumed', { sessionId });
     }
   });
 
   socket.on('end-session', (sessionId) => {
+    log('info', 'End session requested', { sessionId });
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
@@ -430,13 +513,15 @@ Your opening statement:`;
       // Clean up session after delay
       setTimeout(() => {
         sessions.delete(sessionId);
+        log('info', 'Session deleted from memory', { sessionId });
       }, 60000);
     }
     io.to(sessionId).emit('session-ended');
+    log('info', 'Session ended', { sessionId });
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    log('info', `User disconnected: ${socket.id}`);
   });
 });
 
@@ -444,12 +529,18 @@ Your opening statement:`;
 async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused) {
+    log('info', 'Skipping conversation - session not ready', { 
+      sessionExists: !!session, 
+      isActive: session?.isActive, 
+      isPaused: session?.isPaused 
+    });
     return;
   }
 
   // Check time and message limits
   const elapsed = session.startTime ? Date.now() - session.startTime : 0;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    log('info', 'Conversation limits reached', { elapsed, totalMessages: session.totalMessages });
     session.isActive = false;
     session.status = 'ended';
     io.to(sessionId).emit('conversation-ended', {
@@ -461,7 +552,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   try {
     await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey);
   } catch (error) {
-    console.error('Synchronized conversation error:', error);
+    log('error', 'Synchronized conversation error', error);
   }
 }
 
@@ -469,12 +560,18 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
 async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused) {
+    log('info', 'Skipping agent response - session not ready', { 
+      sessionExists: !!session, 
+      isActive: session?.isActive, 
+      isPaused: session?.isPaused 
+    });
     return;
   }
 
   // Check limits again
   const elapsed = session.startTime ? Date.now() - session.startTime : 0;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    log('info', 'Agent response cancelled - limits reached', { elapsed, totalMessages: session.totalMessages });
     session.isActive = false;
     session.status = 'ended';
     io.to(sessionId).emit('conversation-ended', {
@@ -505,6 +602,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
     }
 
+    log('info', 'Selected next agent', { agentId: nextAgent.id, agentName: nextAgent.name });
+
     const response = await generateAgentResponse(
       geminiApiKey,
       nextAgent.id,
@@ -529,14 +628,23 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       timestamp: new Date()
     });
 
+    log('info', 'Agent message sent', { 
+      sessionId, 
+      agentName: nextAgent.name, 
+      totalMessages: session.totalMessages,
+      audioDuration 
+    });
+
     // Schedule next response if within limits
     const remainingTime = session.maxDuration - (Date.now() - session.startTime);
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused && remainingTime > 30000) {
       session.nextTimeout = setTimeout(() => {
+        log('info', 'Scheduling next conversation turn');
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + 2000);
     } else {
       // End conversation
+      log('info', 'Ending conversation - limits reached or session ending');
       session.isActive = false;
       session.status = 'ended';
       session.nextTimeout = setTimeout(() => {
@@ -547,11 +655,45 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     }
 
   } catch (error) {
-    console.error('Next agent response error:', error);
+    log('error', 'Next agent response error', error);
   }
 }
 
+// Add session status endpoint for debugging
+app.get('/api/session/:sessionId/status', (req, res) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  res.json({
+    sessionId,
+    status: session.status,
+    isActive: session.isActive,
+    isPaused: session.isPaused,
+    totalMessages: session.totalMessages,
+    startTime: session.startTime,
+    createdAt: session.createdAt,
+    currentSpeaker: session.currentSpeaker
+  });
+});
+
+// Add sessions list endpoint for debugging
+app.get('/api/sessions', (req, res) => {
+  const sessionList = Array.from(sessions.entries()).map(([id, session]) => ({
+    sessionId: id,
+    status: session.status,
+    isActive: session.isActive,
+    totalMessages: session.totalMessages,
+    createdAt: session.createdAt
+  }));
+  
+  res.json({ sessions: sessionList, count: sessionList.length });
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  log('info', `Server running on port ${PORT}`);
 });

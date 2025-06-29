@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare, Trash2, Copy, RefreshCw } from 'lucide-react';
+import { Send, MessageSquare, Trash2, Copy, RefreshCw, AlertCircle } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -35,8 +35,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+
+  // Enhanced logging function
+  const log = (level: string, message: string, data?: any) => {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] [CHAT-${level.toUpperCase()}] ${message}`;
+    
+    if (data) {
+      console.log(logMessage, data);
+    } else {
+      console.log(logMessage);
+    }
+  };
 
   const scrollToBottom = () => {
     if (autoScroll && messagesEndRef.current) {
@@ -58,16 +72,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   useEffect(() => {
+    log('info', 'Initializing chat interface', { sessionId });
+
     // Initialize socket connection
-    const newSocket = io('http://localhost:3001');
+    const newSocket = io('http://localhost:3001', {
+      timeout: 10000,
+      forceNew: true
+    });
     setSocket(newSocket);
+    socketRef.current = newSocket;
 
     newSocket.on('connect', () => {
+      log('info', 'Chat socket connected');
       setIsConnected(true);
+      setError(null);
     });
 
     newSocket.on('disconnect', () => {
+      log('warn', 'Chat socket disconnected');
       setIsConnected(false);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      log('error', 'Chat socket connection error', error);
+      setIsConnected(false);
+      setError('Failed to connect to chat server');
     });
 
     // Join session
@@ -75,6 +104,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
+      log('info', 'Received agent message in chat', { agentName: data.agentName });
       const aiMessage: Message = {
         id: `${Date.now()}_${Math.random()}`,
         content: data.message,
@@ -87,6 +117,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
+      log('info', 'Conversation ended in chat', data);
       const systemMessage: Message = {
         id: `${Date.now()}_${Math.random()}`,
         content: data.message,
@@ -97,13 +128,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setMessages(prev => [...prev, systemMessage]);
     });
 
+    // Listen for errors
+    newSocket.on('error', (error) => {
+      log('error', 'Chat socket error', error);
+      setError(typeof error === 'string' ? error : 'Chat error occurred');
+    });
+
     return () => {
-      newSocket.disconnect();
+      log('info', 'Cleaning up chat socket');
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [sessionId]);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isProcessing || !socket) return;
+    if (!inputValue.trim() || isProcessing || !socket || !isConnected) {
+      log('warn', 'Cannot send message', { 
+        hasInput: !!inputValue.trim(), 
+        isProcessing, 
+        hasSocket: !!socket, 
+        isConnected 
+      });
+      return;
+    }
 
     const userMessage: Message = {
       id: `${Date.now()}_${Math.random()}`,
@@ -113,20 +162,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       type: 'user'
     };
 
+    log('info', 'Sending user message', { messageLength: inputValue.length });
+
     setMessages(prev => [...prev, userMessage]);
     const currentInput = inputValue;
     setInputValue('');
     setIsProcessing(true);
 
-    // Send message to server
-    socket.emit('user-message', {
-      sessionId,
-      message: currentInput,
-      geminiApiKey,
-      elevenLabsApiKey
-    });
+    try {
+      // Send message to server
+      socket.emit('user-message', {
+        sessionId,
+        message: currentInput,
+        geminiApiKey,
+        elevenLabsApiKey
+      });
 
-    setIsProcessing(false);
+      log('info', 'User message sent to server');
+    } catch (error) {
+      log('error', 'Error sending message', error);
+      setError('Failed to send message');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -142,6 +200,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const clearMessages = () => {
+    log('info', 'Clearing chat messages');
     setMessages([{
       id: '1',
       content: 'Chat cleared. You can continue asking questions about the ongoing discussion.',
@@ -153,6 +212,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const copyMessage = (content: string) => {
     navigator.clipboard.writeText(content);
+    log('info', 'Message copied to clipboard');
   };
 
   const getMessageIcon = (type: string) => {
@@ -182,6 +242,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <div className="flex items-center space-x-2 text-sm text-blue-100">
                 <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
                 <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+                {error && (
+                  <>
+                    <span>•</span>
+                    <span className="text-red-200">{error}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -295,14 +361,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       {/* Enhanced Input */}
       <div className="bg-white border-t border-slate-200 p-4">
+        {error && (
+          <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2 text-sm text-red-700">
+            <AlertCircle className="w-4 h-4" />
+            <span>{error}</span>
+          </div>
+        )}
+        
         <div className="flex items-end space-x-3">
           <div className="flex-1">
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask questions about the topic or request clarification..."
-              className="w-full p-3 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all"
+              placeholder={isConnected 
+                ? "Ask questions about the topic or request clarification..."
+                : "Connecting to chat server..."
+              }
+              className="w-full p-3 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all disabled:opacity-50"
               rows={2}
               disabled={isProcessing || !isConnected}
             />

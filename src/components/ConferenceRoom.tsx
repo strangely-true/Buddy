@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, Mic, MicOff } from 'lucide-react';
+import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, Mic, MicOff, AlertCircle } from 'lucide-react';
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,19 +20,22 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const { user } = useAuth();
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [activeParticipant, setActiveParticipant] = useState<string | null>(null);
-  const [currentTopic, setCurrentTopic] = useState('Preparing AI conference...');
-  const [isCallActive, setIsCallActive] = useState(true);
+  const [currentTopic, setCurrentTopic] = useState('Initializing AI conference...');
+  const [isCallActive, setIsCallActive] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
-  const [conversationStatus, setConversationStatus] = useState<'preparing' | 'active' | 'paused' | 'ended'>('preparing');
+  const [conversationStatus, setConversationStatus] = useState<'initializing' | 'preparing' | 'active' | 'paused' | 'ended' | 'error'>('initializing');
   const [isPaused, setIsPaused] = useState(false);
   const [discussionTime, setDiscussionTime] = useState(0);
   const [maxDiscussionTime] = useState(15 * 60); // 15 minutes in seconds
   const [messageCount, setMessageCount] = useState(0);
   const [maxMessages] = useState(18);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
+  const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const cleanupRef = useRef<boolean>(false);
   const socketRef = useRef<Socket | null>(null);
+  const initializationRef = useRef<boolean>(false);
 
   const participants = [
     { id: 'chen', name: 'Dr. Sarah Chen', role: 'Research Analyst', avatar: '👩‍🔬', color: 'bg-purple-100 text-purple-800' },
@@ -41,6 +44,18 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     { id: 'kim', name: 'Alex Kim', role: 'Innovation Lead', avatar: '👨‍💻', color: 'bg-orange-100 text-orange-800' },
   ];
 
+  // Enhanced logging function
+  const log = (level: string, message: string, data?: any) => {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] [FRONTEND-${level.toUpperCase()}] ${message}`;
+    
+    if (data) {
+      console.log(logMessage, data);
+    } else {
+      console.log(logMessage);
+    }
+  };
+
   // Timer management
   useEffect(() => {
     if (conversationStatus === 'active' && !isPaused && !cleanupRef.current) {
@@ -48,6 +63,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         setDiscussionTime(prev => {
           const newTime = prev + 1;
           if (newTime >= maxDiscussionTime) {
+            log('info', 'Discussion time limit reached');
             handleEndCall();
             return maxDiscussionTime;
           }
@@ -86,6 +102,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     if (cleanupRef.current) return;
     cleanupRef.current = true;
     
+    log('info', 'Cleaning up resources');
+    
     // Clean up audio
     if (currentAudio) {
       currentAudio.pause();
@@ -113,24 +131,83 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   useEffect(() => {
-    if (cleanupRef.current) return;
+    if (cleanupRef.current || initializationRef.current) return;
+    initializationRef.current = true;
+
+    log('info', 'Initializing conference room', { sessionId, geminiApiKey: !!geminiApiKey });
+
+    // Validate required props
+    if (!sessionId || !geminiApiKey) {
+      log('error', 'Missing required props', { sessionId: !!sessionId, geminiApiKey: !!geminiApiKey });
+      setError('Missing session ID or API key');
+      setConversationStatus('error');
+      return;
+    }
 
     // Initialize socket connection
-    const newSocket = io('http://localhost:3001');
+    const newSocket = io('http://localhost:3001', {
+      timeout: 10000,
+      forceNew: true
+    });
+    
     setSocket(newSocket);
     socketRef.current = newSocket;
 
-    // Join session
-    newSocket.emit('join-session', sessionId);
+    // Connection event handlers
+    newSocket.on('connect', () => {
+      log('info', 'Socket connected');
+      setConnectionStatus('connected');
+      setError(null);
+      
+      // Join session
+      newSocket.emit('join-session', sessionId);
+    });
+
+    newSocket.on('disconnect', () => {
+      log('warn', 'Socket disconnected');
+      setConnectionStatus('disconnected');
+    });
+
+    newSocket.on('connect_error', (error) => {
+      log('error', 'Socket connection error', error);
+      setConnectionStatus('error');
+      setError('Failed to connect to server');
+    });
+
+    // Session event handlers
+    newSocket.on('session-status', (data) => {
+      log('info', 'Received session status', data);
+      if (data.status === 'prepared') {
+        setConversationStatus('preparing');
+        setCurrentTopic('AI experts are preparing for discussion...');
+        setIsCallActive(true);
+        
+        // Auto-start the conversation
+        setTimeout(() => {
+          if (!cleanupRef.current) {
+            log('info', 'Auto-starting conversation');
+            newSocket.emit('start-conversation', {
+              sessionId,
+              geminiApiKey,
+              elevenLabsApiKey,
+              userId: user?.id
+            });
+          }
+        }, 1000);
+      }
+    });
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
       if (cleanupRef.current) return;
       
+      log('info', 'Received agent message', { agentId: data.agentId, agentName: data.agentName });
+      
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Expert Discussion in Progress');
       setConversationStatus('active');
       setMessageCount(prev => prev + 1);
+      setIsCallActive(true);
       
       // Play audio if available, speaker is on, and not paused
       if (data.audio && isSpeakerOn && !isPaused) {
@@ -155,6 +232,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     // Listen for conversation pause/resume
     newSocket.on('conversation-paused', () => {
       if (cleanupRef.current) return;
+      log('info', 'Conversation paused');
       setIsPaused(true);
       setConversationStatus('paused');
       if (currentAudio) {
@@ -164,6 +242,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     newSocket.on('conversation-resumed', () => {
       if (cleanupRef.current) return;
+      log('info', 'Conversation resumed');
       setIsPaused(false);
       setConversationStatus('active');
     });
@@ -171,6 +250,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
       if (cleanupRef.current) return;
+      log('info', 'Conversation ended', data);
       setConversationStatus('ended');
       setCurrentTopic(data.message);
       setActiveParticipant(null);
@@ -180,19 +260,20 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     // Listen for session end
     newSocket.on('session-ended', () => {
       if (cleanupRef.current) return;
+      log('info', 'Session ended');
       setIsCallActive(false);
       setConversationStatus('ended');
     });
 
-    // Start conversation
-    newSocket.emit('start-conversation', {
-      sessionId,
-      geminiApiKey,
-      elevenLabsApiKey,
-      userId: user?.id
+    // Listen for errors
+    newSocket.on('error', (error) => {
+      log('error', 'Socket error received', error);
+      setError(typeof error === 'string' ? error : 'An error occurred');
+      setConversationStatus('error');
     });
 
     return () => {
+      log('info', 'Component unmounting, cleaning up');
       cleanupResources();
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey, user?.id]);
@@ -201,6 +282,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     if (cleanupRef.current) return;
     
     try {
+      log('info', 'Playing audio', { duration });
+      
       // Stop any currently playing audio
       if (currentAudio) {
         currentAudio.pause();
@@ -222,7 +305,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       };
 
       audio.onerror = () => {
-        console.error('Audio playback error');
+        log('error', 'Audio playback error');
         URL.revokeObjectURL(audioUrl);
         if (!cleanupRef.current) {
           setActiveParticipant(null);
@@ -231,14 +314,14 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       };
       
       audio.play().catch(error => {
-        console.error('Audio playback error:', error);
+        log('error', 'Audio play error', error);
         if (!cleanupRef.current) {
           setActiveParticipant(null);
           setCurrentAudio(null);
         }
       });
     } catch (error) {
-      console.error('Audio processing error:', error);
+      log('error', 'Audio processing error', error);
       if (!cleanupRef.current) {
         setActiveParticipant(null);
       }
@@ -246,7 +329,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const toggleConversation = () => {
-    if (!socket || cleanupRef.current || conversationStatus === 'ended') return;
+    if (!socket || cleanupRef.current || conversationStatus === 'ended' || conversationStatus === 'error') return;
+
+    log('info', 'Toggling conversation', { isPaused });
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -261,6 +346,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const handleEndCall = () => {
     if (cleanupRef.current) return;
     
+    log('info', 'Ending call');
     cleanupResources();
     
     // Call parent handler with a slight delay to ensure cleanup is complete
@@ -270,6 +356,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const toggleSpeaker = () => {
+    log('info', 'Toggling speaker', { currentState: isSpeakerOn });
     setIsSpeakerOn(!isSpeakerOn);
     if (!isSpeakerOn && currentAudio) {
       currentAudio.pause();
@@ -279,6 +366,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   const getStatusBadge = () => {
     switch (conversationStatus) {
+      case 'initializing':
+        return <span className="px-3 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium">Initializing</span>;
       case 'preparing':
         return <span className="px-3 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">Preparing</span>;
       case 'active':
@@ -287,6 +376,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         return <span className="px-3 py-1 text-xs rounded-full bg-orange-100 text-orange-800 font-medium">Paused</span>;
       case 'ended':
         return <span className="px-3 py-1 text-xs rounded-full bg-red-100 text-red-800 font-medium">Ended</span>;
+      case 'error':
+        return <span className="px-3 py-1 text-xs rounded-full bg-red-100 text-red-800 font-medium">Error</span>;
       default:
         return null;
     }
@@ -300,6 +391,38 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     return Math.min((messageCount / maxMessages) * 100, 100);
   };
 
+  const getConnectionStatusColor = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return 'text-green-600';
+      case 'connecting':
+        return 'text-yellow-600';
+      case 'disconnected':
+        return 'text-orange-600';
+      case 'error':
+        return 'text-red-600';
+      default:
+        return 'text-gray-600';
+    }
+  };
+
+  // Show error state
+  if (conversationStatus === 'error') {
+    return (
+      <div className="bg-white rounded-2xl shadow-xl border border-red-200 h-full flex flex-col items-center justify-center p-8">
+        <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-xl font-bold text-red-800 mb-2">Conference Error</h2>
+        <p className="text-red-600 text-center mb-6">{error || 'An error occurred while setting up the conference'}</p>
+        <button
+          onClick={handleEndCall}
+          className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+        >
+          Return to Dashboard
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
       {/* Enhanced Header */}
@@ -312,7 +435,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               </div>
               <div>
                 <h2 className="text-xl font-bold text-slate-800">AI Expert Panel</h2>
-                <p className="text-sm text-slate-600">4 Specialists • Real-time Discussion</p>
+                <div className="flex items-center space-x-2">
+                  <p className="text-sm text-slate-600">4 Specialists • Real-time Discussion</p>
+                  <div className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className={`text-xs ${getConnectionStatusColor()}`}>
+                    {connectionStatus}
+                  </span>
+                </div>
               </div>
             </div>
             {getStatusBadge()}
@@ -324,7 +453,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               {/* Pause/Resume Button */}
               <button
                 onClick={toggleConversation}
-                disabled={conversationStatus === 'ended' || conversationStatus === 'preparing'}
+                disabled={conversationStatus === 'ended' || conversationStatus === 'preparing' || conversationStatus === 'initializing' || conversationStatus === 'error'}
                 className={`p-2 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                   isPaused 
                     ? 'bg-green-600 text-white hover:bg-green-700 shadow-md' 
@@ -337,7 +466,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               <button
                 onClick={toggleSpeaker}
-                disabled={conversationStatus === 'ended'}
+                disabled={conversationStatus === 'ended' || conversationStatus === 'error'}
                 className={`p-2 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                   isSpeakerOn 
                     ? 'bg-slate-600 text-white hover:bg-slate-700 shadow-md' 
@@ -446,10 +575,17 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             </p>
           </div>
           
-          {conversationStatus === 'preparing' && (
+          {conversationStatus === 'initializing' && (
             <div className="flex items-center justify-center space-x-2 text-sm text-blue-600">
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-              <span>Analyzing content and preparing discussion...</span>
+              <span>Connecting to AI conference system...</span>
+            </div>
+          )}
+          
+          {conversationStatus === 'preparing' && (
+            <div className="flex items-center justify-center space-x-2 text-sm text-yellow-600">
+              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+              <span>AI experts are analyzing your topic and preparing discussion...</span>
             </div>
           )}
           
@@ -470,6 +606,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           {conversationStatus === 'ended' && (
             <div className="flex items-center justify-center space-x-2 text-sm text-slate-600">
               <span>✅ Expert discussion completed</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center justify-center space-x-2 text-sm text-red-600 mt-2">
+              <AlertCircle className="w-4 h-4" />
+              <span>{error}</span>
             </div>
           )}
         </div>
