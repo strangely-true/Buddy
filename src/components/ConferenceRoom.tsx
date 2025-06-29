@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, MessageCircle } from 'lucide-react';
-import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 
 interface ConferenceRoomProps {
@@ -8,7 +7,7 @@ interface ConferenceRoomProps {
   sessionId: string;
   geminiApiKey: string;
   elevenLabsApiKey: string;
-  onConversationEnd: (summary: any) => void;
+  onConversationEnd: () => void;
 }
 
 const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ 
@@ -30,8 +29,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [maxMessages] = useState(15);
   const [discussionTime, setDiscussionTime] = useState(0);
   const [isEnding, setIsEnding] = useState(false);
-  const [isManualEnd, setIsManualEnd] = useState(false);
-  const [hasEnded, setHasEnded] = useState(false); // Prevent multiple end calls
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
@@ -71,7 +68,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   // Timer for discussion duration
   useEffect(() => {
-    if (conversationStatus === 'active' && !isPaused && !isEnding && !hasEnded) {
+    if (conversationStatus === 'active' && !isPaused && !isEnding) {
       timerRef.current = setInterval(() => {
         setDiscussionTime(prev => prev + 1);
       }, 1000);
@@ -87,7 +84,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         clearInterval(timerRef.current);
       }
     };
-  }, [conversationStatus, isPaused, isEnding, hasEnded]);
+  }, [conversationStatus, isPaused, isEnding]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -96,7 +93,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   useEffect(() => {
-    if (hasEnded) return; // Don't initialize if already ended
+    if (isEnding) return;
 
     // Initialize socket connection
     const newSocket = io('http://localhost:3001');
@@ -107,7 +104,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
-      if (isEnding || hasEnded) return;
+      if (isEnding) return;
       
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Expert Discussion in Progress');
@@ -118,13 +115,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         playAudio(data.audio, data.audioDuration || 5000);
       } else if (data.audioDuration) {
         setTimeout(() => {
-          if (!isEnding && !hasEnded) {
+          if (!isEnding) {
             setActiveParticipant(null);
           }
         }, data.audioDuration);
       } else {
         setTimeout(() => {
-          if (!isEnding && !hasEnded) {
+          if (!isEnding) {
             setActiveParticipant(null);
           }
         }, 5000);
@@ -133,7 +130,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for conversation pause/resume
     newSocket.on('conversation-paused', () => {
-      if (!hasEnded) {
+      if (!isEnding) {
         setIsPaused(true);
         if (currentAudio) {
           currentAudio.pause();
@@ -142,34 +139,24 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     });
 
     newSocket.on('conversation-resumed', () => {
-      if (!hasEnded) {
+      if (!isEnding) {
         setIsPaused(false);
       }
     });
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
-      if (isEnding || hasEnded) return;
+      if (isEnding) return;
       
-      console.log('Received conversation-ended event:', data);
-      setIsEnding(true);
-      setConversationStatus('ended');
-      setCurrentTopic(data.message);
-      setActiveParticipant(null);
-      
-      setTimeout(() => {
-        handleConversationEnd(false);
-      }, 2000);
+      console.log('Conversation ended naturally');
+      handleConversationEnd();
     });
 
     // Listen for session end
     newSocket.on('session-ended', () => {
-      if (!hasEnded) {
-        console.log('Received session-ended event');
-        setIsCallActive(false);
-        if (!isEnding) {
-          handleConversationEnd(isManualEnd);
-        }
+      if (!isEnding) {
+        console.log('Session ended');
+        handleConversationEnd();
       }
     });
 
@@ -192,14 +179,10 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
-  const handleConversationEnd = async (manualEnd: boolean = false) => {
-    if (hasEnded) {
-      console.log('Conversation already ended, skipping...');
-      return;
-    }
+  const handleConversationEnd = () => {
+    if (isEnding) return;
     
-    console.log('Handling conversation end, manual:', manualEnd);
-    setHasEnded(true);
+    console.log('Handling conversation end');
     setIsEnding(true);
     setIsCallActive(false);
     
@@ -219,28 +202,14 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       socket.disconnect();
     }
     
-    // Create conversation summary
-    const summary = {
-      sessionId,
-      totalMessages: messageCount,
-      duration: discussionTime,
-      topic: currentTopic === 'Preparing AI conference...' ? 'AI Expert Discussion' : currentTopic,
-      participants: participants.map(p => p.name),
-      endedAt: new Date().toISOString(),
-      status: 'completed',
-      endType: manualEnd ? 'manual' : 'automatic'
-    };
-
-    console.log('Generated summary:', summary);
-
-    // Pass summary to parent with a small delay
+    // End the conversation and go back to upload
     setTimeout(() => {
-      onConversationEnd(summary);
+      onConversationEnd();
     }, 1000);
   };
 
   const playAudio = (audioBase64: string, duration: number) => {
-    if (isEnding || hasEnded) return;
+    if (isEnding) return;
     
     try {
       if (currentAudio) {
@@ -256,7 +225,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        if (!isEnding && !hasEnded) {
+        if (!isEnding) {
           setActiveParticipant(null);
         }
         setCurrentAudio(null);
@@ -265,7 +234,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       audio.onerror = () => {
         console.error('Audio playback error');
         URL.revokeObjectURL(audioUrl);
-        if (!isEnding && !hasEnded) {
+        if (!isEnding) {
           setActiveParticipant(null);
         }
         setCurrentAudio(null);
@@ -273,21 +242,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       
       audio.play().catch(error => {
         console.error('Audio playback error:', error);
-        if (!isEnding && !hasEnded) {
+        if (!isEnding) {
           setActiveParticipant(null);
         }
         setCurrentAudio(null);
       });
     } catch (error) {
       console.error('Audio processing error:', error);
-      if (!isEnding && !hasEnded) {
+      if (!isEnding) {
         setActiveParticipant(null);
       }
     }
   };
 
   const toggleConversation = () => {
-    if (!socket || isEnding || hasEnded) return;
+    if (!socket || isEnding) return;
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -302,16 +271,15 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const handleEndCall = () => {
-    if (isEnding || hasEnded) return;
+    if (isEnding) return;
     
     console.log('Manual end call triggered');
-    setIsManualEnd(true);
     
     if (socket) {
       socket.emit('end-session', sessionId);
     }
     
-    handleConversationEnd(true);
+    handleConversationEnd();
   };
 
   const toggleSpeaker = () => {
@@ -333,18 +301,20 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     return 'bg-green-500';
   };
 
-  if (isEnding || hasEnded) {
+  if (isEnding) {
     return (
       <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
             <MessageCircle className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Discussion Complete</h2>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">Discussion Complete!</h2>
           <p className="text-slate-600 mb-4">
-            {isManualEnd ? 'Ending conversation and saving...' : 'Generating summary and saving conversation...'}
+            The AI experts have concluded their discussion. You'll be redirected to start a new conversation.
           </p>
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div className="text-sm text-slate-500">
+            Duration: {formatTime(discussionTime)} • Messages: {messageCount}
+          </div>
         </div>
       </div>
     );
@@ -430,7 +400,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
           <button
             onClick={handleEndCall}
-            disabled={isEnding || hasEnded}
+            disabled={isEnding}
             className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50"
             title="End Discussion"
           >
@@ -532,12 +502,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <div className="inline-flex items-center space-x-2 text-sm text-yellow-600 bg-yellow-50 px-4 py-2 rounded-full">
               <Pause className="w-3 h-3" />
               <span>Discussion paused - Click play to resume</span>
-            </div>
-          )}
-          
-          {conversationStatus === 'ended' && (
-            <div className="inline-flex items-center space-x-2 text-sm text-slate-600 bg-slate-100 px-4 py-2 rounded-full">
-              <span>✅ Expert discussion completed</span>
             </div>
           )}
 
