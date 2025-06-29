@@ -1,0 +1,25 @@
+{
+  "name": "buddy-ai-backend",
+  "description": "Backend server for Buddy AI Conference platform",
+  "repository": "https://github.com/your-username/buddy-ai-conference",
+  "logo": "https://node-js-sample.herokuapp.com/node.png",
+  "keywords": ["node", "express", "ai", "websockets", "conference"],
+  "image": "heroku/nodejs",
+  "env": {
+    "NODE_ENV": {
+      "description": "Node environment",
+      "value": "production"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ]
+}

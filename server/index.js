@@ -10,15 +10,27 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
+
+// Configure CORS for production
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://curious-cobbler-87bad4.netlify.app', 'https://your-custom-domain.com'] // Add your frontend URLs
+    : ['http://localhost:5173', 'http://localhost:3000'],
+  methods: ["GET", "POST"],
+  credentials: true
+};
+
 const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"]
-  }
+  cors: corsOptions
 });
 
-app.use(cors());
-app.use(express.json());
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Store active sessions with enhanced tracking
 const sessions = new Map();
@@ -630,5 +642,6 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Buddy AI Backend Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
