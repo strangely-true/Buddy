@@ -152,6 +152,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       return;
     }
 
+    if (!geminiApiKey || !elevenLabsApiKey) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        content: 'Cannot send message: Both Gemini and ElevenLabs API keys are required.',
+        sender: 'System',
+        timestamp: new Date(),
+        type: 'system'
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputValue,
@@ -164,6 +176,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const currentInput = inputValue;
     setInputValue('');
     setIsProcessing(true);
+
+    console.log('Sending user message with API keys:');
+    console.log('Gemini key provided:', !!geminiApiKey);
+    console.log('ElevenLabs key provided:', !!elevenLabsApiKey);
+    console.log('ElevenLabs key (first 8 chars):', elevenLabsApiKey.substring(0, 8) + '...');
 
     // Send message to server
     socket.emit('user-message', {
@@ -199,6 +216,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return agentAvatars[agentId as keyof typeof agentAvatars] || '🤖';
   };
 
+  const canSendMessage = inputValue.trim() && !isProcessing && !connectionError && geminiApiKey && elevenLabsApiKey;
+
   return (
     <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl border border-gray-700/50 h-full flex flex-col overflow-hidden relative shadow-2xl">
       {/* Modern Header */}
@@ -215,6 +234,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <span>Join the expert conversation</span>
                 {connectionError && (
                   <span className="text-red-400 text-xs ml-2">(Backend disconnected)</span>
+                )}
+                {(!geminiApiKey || !elevenLabsApiKey) && (
+                  <span className="text-amber-400 text-xs ml-2">(API keys required)</span>
                 )}
               </p>
             </div>
@@ -326,20 +348,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder={connectionError 
-                ? "Backend server not connected - messages cannot be sent"
-                : "Ask questions about the topic or request clarification..."
+              placeholder={
+                connectionError 
+                  ? "Backend server not connected - messages cannot be sent"
+                  : (!geminiApiKey || !elevenLabsApiKey)
+                  ? "Both API keys are required to send messages"
+                  : "Ask questions about the topic or request clarification..."
               }
               className="w-full p-4 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200 text-white placeholder-gray-400 disabled:opacity-50"
               rows={2}
-              disabled={isProcessing || connectionError}
+              disabled={!canSendMessage}
               style={{ minHeight: '60px', maxHeight: '120px' }}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isProcessing || connectionError}
+            disabled={!canSendMessage}
             className="p-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-2xl hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
             title="Send Message"
           >
@@ -352,6 +377,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <span>
             {connectionError 
               ? "Backend server connection required for AI responses"
+              : (!geminiApiKey || !elevenLabsApiKey)
+              ? "Both Gemini and ElevenLabs API keys are required to participate"
               : "Ask specific questions to guide the expert discussion or request deeper analysis"
             }
           </span>

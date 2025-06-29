@@ -234,6 +234,8 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
   }
 
   try {
+    console.log('Attempting ElevenLabs API call with key:', elevenLabsApiKey.substring(0, 8) + '...');
+    
     const response = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
@@ -250,16 +252,26 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
         headers: {
           'Accept': 'audio/mpeg',
           'Content-Type': 'application/json',
-          'xi-api-key': elevenLabsApiKey,
+          'xi-api-key': elevenLabsApiKey.trim(), // Ensure no whitespace
         },
         responseType: 'arraybuffer',
         timeout: 30000
       }
     );
 
+    console.log('ElevenLabs API response status:', response.status);
     return Buffer.from(response.data).toString('base64');
   } catch (error) {
-    console.error('ElevenLabs API error:', error.response?.status, error.response?.statusText);
+    console.error('ElevenLabs API error details:');
+    console.error('Status:', error.response?.status);
+    console.error('Status Text:', error.response?.statusText);
+    console.error('Response Data:', error.response?.data ? Buffer.from(error.response.data).toString() : 'No response data');
+    console.error('API Key used (first 8 chars):', elevenLabsApiKey ? elevenLabsApiKey.substring(0, 8) + '...' : 'No key provided');
+    
+    if (error.response?.status === 401) {
+      console.error('ElevenLabs 401 Unauthorized - Check API key validity');
+    }
+    
     return null;
   }
 }
@@ -282,39 +294,9 @@ app.post('/api/process-content', async (req, res) => {
     if (geminiApiKey) {
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
 
-      let analysisPrompt;
-      let multimodalContent = [];
-
-      if (type === 'multimodal' && content.images && content.images.length > 0) {
-        analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
-
-Text content: ${content.text}
-
-For the uploaded images, analyze their content, context, and relevance to the text.
-
-Create a structured analysis for expert discussion:
-1. Core topic definition (be very specific)
-2. Key discussion points (3-4 focused areas)
-3. Expert perspectives needed (research, strategy, academic, innovation angles)
-4. Specific questions or challenges to explore
-5. Boundaries - what should NOT be discussed to maintain focus
-
-The discussion must stay strictly within this topic scope. Experts should not deviate to general or unrelated topics.`;
-
-        multimodalContent.push({ text: analysisPrompt });
-
-        content.images.forEach(image => {
-          multimodalContent.push({
-            inlineData: {
-              mimeType: image.mimeType,
-              data: image.data
-            }
-          });
-        });
-      } else {
-        const textContent = typeof content === 'object' ? content.text : content;
-        
-        analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
+      const textContent = typeof content === 'object' ? content.text : content;
+      
+      const analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
 
 ${textContent}
 
@@ -329,12 +311,9 @@ The experts must stay strictly within this topic scope and not deviate to genera
 
 Keep the analysis concise but comprehensive for a focused 5-15 minute expert discussion.`;
 
-        multimodalContent = [{ text: analysisPrompt }];
-      }
-
       const response = await genAI.models.generateContent({
         model: "gemini-2.0-flash",
-        contents: multimodalContent,
+        contents: analysisPrompt,
       });
 
       analysis = response.text;
@@ -392,6 +371,11 @@ io.on('connection', (socket) => {
     const { sessionId, geminiApiKey, elevenLabsApiKey, customPersonalities } = data;
     const session = sessions.get(sessionId);
     
+    console.log('Starting conversation with API keys:');
+    console.log('Gemini key provided:', !!geminiApiKey);
+    console.log('ElevenLabs key provided:', !!elevenLabsApiKey);
+    console.log('ElevenLabs key (first 8 chars):', elevenLabsApiKey ? elevenLabsApiKey.substring(0, 8) + '...' : 'None');
+    
     if (!session || session.isEnding) {
       socket.emit('error', 'Session not found or ending');
       return;
@@ -402,6 +386,10 @@ io.on('connection', (socket) => {
       if (customPersonalities) {
         session.participants = getAgents(customPersonalities);
       }
+
+      // Store API keys in session for later use
+      session.geminiApiKey = geminiApiKey;
+      session.elevenLabsApiKey = elevenLabsApiKey;
 
       const openingAgent = session.participants[0]; // Dr. Chen or custom first agent
       
@@ -441,6 +429,7 @@ Stay strictly within the topic boundaries defined in the analysis.`;
       session.totalMessages++;
       session.lastSpeakers = [openingAgent.id];
 
+      console.log('Generating speech for opening message with ElevenLabs key:', elevenLabsApiKey ? elevenLabsApiKey.substring(0, 8) + '...' : 'None');
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
       const audioDuration = estimateAudioDuration(message);
 
@@ -468,6 +457,10 @@ Stay strictly within the topic boundaries defined in the analysis.`;
     const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
     const session = sessions.get(sessionId);
     
+    console.log('User message received with API keys:');
+    console.log('Gemini key provided:', !!geminiApiKey);
+    console.log('ElevenLabs key provided:', !!elevenLabsApiKey);
+    
     if (!session || session.isEnding) {
       socket.emit('error', 'Session not found or ending');
       return;
@@ -478,6 +471,10 @@ Stay strictly within the topic boundaries defined in the analysis.`;
         clearTimeout(session.nextTimeout);
         session.nextTimeout = null;
       }
+
+      // Update session with latest API keys
+      session.geminiApiKey = geminiApiKey;
+      session.elevenLabsApiKey = elevenLabsApiKey;
 
       session.conversationHistory.push(`User: ${message}`);
       session.messageHistory.push({
@@ -565,7 +562,11 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   }
 
   try {
-    await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey);
+    // Use stored API keys from session if not provided
+    const finalGeminiKey = geminiApiKey || session.geminiApiKey;
+    const finalElevenLabsKey = elevenLabsApiKey || session.elevenLabsApiKey;
+    
+    await generateNextAgentResponse(sessionId, finalGeminiKey, finalElevenLabsKey);
   } catch (error) {
     console.error('Synchronized conversation error:', error);
   }
@@ -579,6 +580,15 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   }
 
   try {
+    // Use stored API keys from session if not provided
+    const finalGeminiKey = geminiApiKey || session.geminiApiKey;
+    const finalElevenLabsKey = elevenLabsApiKey || session.elevenLabsApiKey;
+    
+    console.log('Generating next agent response with API keys:');
+    console.log('Gemini key available:', !!finalGeminiKey);
+    console.log('ElevenLabs key available:', !!finalElevenLabsKey);
+    console.log('ElevenLabs key (first 8 chars):', finalElevenLabsKey ? finalElevenLabsKey.substring(0, 8) + '...' : 'None');
+
     const nextAgent = selectNextAgent(
       session.currentSpeaker, 
       session.conversationHistory, 
@@ -588,7 +598,7 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     );
 
     const response = await generateAgentResponse(
-      geminiApiKey,
+      finalGeminiKey,
       nextAgent.id,
       session.topic,
       session.conversationHistory,
@@ -609,7 +619,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     
     session.lastSpeakers = [nextAgent.id, ...(session.lastSpeakers || [])].slice(0, 3);
 
-    const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
+    console.log('Generating speech for agent response with ElevenLabs key:', finalElevenLabsKey ? finalElevenLabsKey.substring(0, 8) + '...' : 'None');
+    const audioBase64 = await generateSpeech(response, nextAgent.voiceId, finalElevenLabsKey);
     const audioDuration = estimateAudioDuration(response);
 
     io.to(sessionId).emit('agent-message', {
@@ -624,7 +635,7 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused && !session.isEnding) {
       const nextDelay = 2000 + Math.random() * 3000;
       session.nextTimeout = setTimeout(() => {
-        startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
+        startSynchronizedConversation(sessionId, finalGeminiKey, finalElevenLabsKey);
       }, audioDuration + nextDelay);
     } else if (session.totalMessages >= session.maxMessages && !session.isEnding) {
       session.isEnding = true;

@@ -173,13 +173,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         }
       });
 
-      // Start conversation only if connected
-      if (!connectionError) {
+      // Start conversation only if connected and API keys are available
+      if (!connectionError && geminiApiKey && elevenLabsApiKey) {
+        console.log('Starting conversation with API keys:');
+        console.log('Gemini key provided:', !!geminiApiKey);
+        console.log('ElevenLabs key provided:', !!elevenLabsApiKey);
+        console.log('ElevenLabs key (first 8 chars):', elevenLabsApiKey.substring(0, 8) + '...');
+        
         newSocket.emit('start-conversation', {
           sessionId,
           geminiApiKey,
           elevenLabsApiKey
         });
+      } else {
+        console.error('Cannot start conversation - missing API keys or connection error');
+        setCurrentTopic('API keys required to start discussion');
       }
 
       return () => {
@@ -400,11 +408,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           </div>
         )}
 
+        {/* API Keys Missing Warning */}
+        {(!geminiApiKey || !elevenLabsApiKey) && (
+          <div className="mt-4 p-3 bg-amber-500/20 border border-amber-500/30 rounded-xl flex items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+            <div className="text-sm text-amber-300">
+              <strong>API Keys Required:</strong> Both Gemini and ElevenLabs API keys are needed for the discussion.
+            </div>
+          </div>
+        )}
+
         {/* Control Buttons */}
         <div className="flex items-center justify-center space-x-4 mt-6">
           <button
             onClick={toggleConversation}
-            disabled={!isCallActive || conversationStatus === 'ended' || isEnding || connectionError}
+            disabled={!isCallActive || conversationStatus === 'ended' || isEnding || connectionError || !geminiApiKey || !elevenLabsApiKey}
             className={`p-4 rounded-2xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
               isPaused 
                 ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg' 
@@ -517,7 +535,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             {currentTopic}
           </p>
           
-          {conversationStatus === 'preparing' && !connectionError && (
+          {conversationStatus === 'preparing' && !connectionError && geminiApiKey && elevenLabsApiKey && (
             <div className="inline-flex items-center space-x-2 text-sm text-blue-300 bg-blue-500/20 px-4 py-2 rounded-full border border-blue-500/30">
               <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
               <span>Analyzing content and preparing discussion...</span>
@@ -542,6 +560,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <div className="inline-flex items-center space-x-2 text-sm text-red-300 bg-red-500/20 px-4 py-2 rounded-full border border-red-500/30">
               <AlertTriangle className="w-3 h-3" />
               <span>Backend server required for AI discussion features</span>
+            </div>
+          )}
+
+          {(!geminiApiKey || !elevenLabsApiKey) && (
+            <div className="inline-flex items-center space-x-2 text-sm text-amber-300 bg-amber-500/20 px-4 py-2 rounded-full border border-amber-500/30">
+              <AlertTriangle className="w-3 h-3" />
+              <span>Both API keys required to start discussion</span>
             </div>
           )}
 
