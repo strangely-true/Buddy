@@ -35,7 +35,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [showScrollButton, setShowScrollButton] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -53,38 +52,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     'kim': '👨‍💻'
   };
 
-  // Enhanced scroll to bottom with smooth animation
-  const scrollToBottom = (force = false) => {
-    if (autoScroll || force) {
-      messagesEndRef.current?.scrollIntoView({ 
-        behavior: 'smooth',
-        block: 'end'
-      });
+  const scrollToBottom = () => {
+    if (autoScroll) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  // Auto-scroll when new messages arrive
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Enhanced scroll handling with better UX
+  // Handle manual scrolling to disable auto-scroll
   const handleScroll = () => {
     if (messagesContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 50; // 50px threshold
-      const isNearTop = scrollTop < 100;
-      
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
       setAutoScroll(isAtBottom);
-      setShowScrollButton(!isAtBottom && !isNearTop);
     }
-  };
-
-  // Force scroll to bottom when button is clicked
-  const forceScrollToBottom = () => {
-    setAutoScroll(true);
-    setShowScrollButton(false);
-    scrollToBottom(true);
   };
 
   useEffect(() => {
@@ -98,7 +82,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
       const aiMessage: Message = {
-        id: `${Date.now()}-${Math.random()}`,
+        id: Date.now().toString(),
         content: data.message,
         sender: data.agentName,
         timestamp: new Date(data.timestamp),
@@ -111,20 +95,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
       const systemMessage: Message = {
-        id: `${Date.now()}-${Math.random()}`,
+        id: Date.now().toString(),
         content: data.message,
-        sender: 'System',
-        timestamp: new Date(),
-        type: 'system'
-      };
-      setMessages(prev => [...prev, systemMessage]);
-    });
-
-    // Listen for session end
-    newSocket.on('session-ended', () => {
-      const systemMessage: Message = {
-        id: `${Date.now()}-${Math.random()}`,
-        content: 'Discussion session has ended. Thank you for participating!',
         sender: 'System',
         timestamp: new Date(),
         type: 'system'
@@ -141,7 +113,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (!inputValue.trim() || isProcessing || !socket) return;
 
     const userMessage: Message = {
-      id: `${Date.now()}-${Math.random()}`,
+      id: Date.now().toString(),
       content: inputValue,
       sender: 'You',
       timestamp: new Date(),
@@ -171,6 +143,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const enableAutoScroll = () => {
+    setAutoScroll(true);
+    scrollToBottom();
+  };
+
   const getAgentColor = (agentId?: string) => {
     if (!agentId) return 'bg-slate-100 text-slate-800 border-slate-200';
     return agentColors[agentId as keyof typeof agentColors] || 'bg-slate-100 text-slate-800 border-slate-200';
@@ -184,7 +161,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
       {/* Modern Header */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4 flex-shrink-0">
+      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
@@ -195,10 +172,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <p className="text-xs text-slate-300">Join the expert conversation</p>
             </div>
           </div>
-          {showScrollButton && (
+          {!autoScroll && (
             <button
-              onClick={forceScrollToBottom}
-              className="text-xs px-3 py-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors animate-pulse"
+              onClick={enableAutoScroll}
+              className="text-xs px-3 py-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
             >
               ↓ New messages
             </button>
@@ -206,15 +183,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
       </div>
 
-      {/* Messages Container with Fixed Height and Scrolling */}
+      {/* Messages */}
       <div 
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white"
-        style={{ 
-          height: '70vh',
-          maxHeight: '70vh',
-          minHeight: '400px'
-        }}
         onScroll={handleScroll}
       >
         {messages.map((message) => (
@@ -223,18 +195,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl p-4 shadow-sm border transition-all duration-200 hover:shadow-md break-words ${
+              className={`max-w-[85%] rounded-2xl p-4 shadow-sm border transition-all duration-200 hover:shadow-md ${
                 message.type === 'user'
                   ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border-blue-600'
                   : message.type === 'system'
                   ? 'bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 border-amber-200'
                   : `${getAgentColor(message.agentId)} border`
               }`}
-              style={{
-                wordWrap: 'break-word',
-                overflowWrap: 'break-word',
-                hyphens: 'auto'
-              }}
             >
               {(message.type === 'ai' || message.type === 'system') && (
                 <div className="flex items-center space-x-2 mb-2">
@@ -249,7 +216,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   </div>
                 </div>
               )}
-              <div className="text-sm leading-relaxed whitespace-pre-wrap">
+              <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                 {message.content}
               </div>
               <div className={`text-xs mt-2 opacity-75 ${
@@ -264,8 +231,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
           </div>
         ))}
-        
-        {/* Processing Indicator */}
         {isProcessing && (
           <div className="flex justify-start">
             <div className="bg-gradient-to-r from-slate-100 to-slate-200 text-slate-800 rounded-2xl p-4 max-w-[85%] border border-slate-200">
@@ -280,13 +245,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
           </div>
         )}
-        
-        {/* Scroll anchor */}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Modern Input Area */}
-      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200 flex-shrink-0">
+      {/* Modern Input */}
+      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200">
         <div className="flex items-end space-x-3">
           <div className="flex-1">
             <textarea
@@ -297,17 +260,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               className="w-full p-4 border-2 border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white shadow-sm"
               rows={2}
               disabled={isProcessing}
-              style={{
-                minHeight: '60px',
-                maxHeight: '120px'
-              }}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isProcessing}
-            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
+            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
             title="Send Message"
           >
             <Send className="w-5 h-5" />

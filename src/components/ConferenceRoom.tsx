@@ -27,10 +27,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [messageCount, setMessageCount] = useState(0);
   const [maxMessages] = useState(15); // Limited focused discussion
   const [discussionTime, setDiscussionTime] = useState(0);
-  const [isEnding, setIsEnding] = useState(false);
-  const [routingError, setRoutingError] = useState<string | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const endingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
     { 
@@ -69,7 +66,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   // Timer for discussion duration
   useEffect(() => {
-    if (conversationStatus === 'active' && !isPaused && !isEnding) {
+    if (conversationStatus === 'active' && !isPaused) {
       timerRef.current = setInterval(() => {
         setDiscussionTime(prev => prev + 1);
       }, 1000);
@@ -85,78 +82,12 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         clearInterval(timerRef.current);
       }
     };
-  }, [conversationStatus, isPaused, isEnding]);
+  }, [conversationStatus, isPaused]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Enhanced call ending with proper cleanup and routing
-  const handleCallEnd = async () => {
-    try {
-      setIsEnding(true);
-      setRoutingError(null);
-      
-      // Stop any playing audio immediately
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.src = '';
-        setCurrentAudio(null);
-      }
-      
-      // Clear all timers
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      
-      if (endingTimeoutRef.current) {
-        clearTimeout(endingTimeoutRef.current);
-        endingTimeoutRef.current = null;
-      }
-      
-      // Update states
-      setIsCallActive(false);
-      setActiveParticipant(null);
-      setConversationStatus('ended');
-      
-      // Disconnect socket
-      if (socket) {
-        socket.emit('end-session', sessionId);
-        socket.disconnect();
-        setSocket(null);
-      }
-      
-      // Route to home page with a small delay to ensure cleanup
-      endingTimeoutRef.current = setTimeout(() => {
-        try {
-          onEndCall();
-        } catch (error) {
-          console.error('Routing error:', error);
-          setRoutingError('Failed to return to home page. Please refresh the page.');
-          setIsEnding(false);
-        }
-      }, 500);
-      
-    } catch (error) {
-      console.error('Error ending call:', error);
-      setRoutingError('Error ending call. Please try again.');
-      setIsEnding(false);
-    }
-  };
-
-  // Handle conversation end event
-  const handleConversationEnd = () => {
-    setConversationStatus('ended');
-    setCurrentTopic('Expert discussion completed successfully');
-    setActiveParticipant(null);
-    
-    // Auto-end call after conversation completes
-    endingTimeoutRef.current = setTimeout(() => {
-      handleCallEnd();
-    }, 3000);
   };
 
   useEffect(() => {
@@ -169,61 +100,49 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
-      if (!isEnding) {
-        setActiveParticipant(data.agentId);
-        setCurrentTopic('AI Expert Discussion in Progress');
-        setConversationStatus('active');
-        setMessageCount(prev => prev + 1);
-        
-        // Play audio if available, speaker is on, and not paused
-        if (data.audio && isSpeakerOn && !isPaused) {
-          playAudio(data.audio, data.audioDuration || 5000);
-        } else if (data.audioDuration) {
-          // Even without audio, simulate the speaking duration
-          setTimeout(() => {
-            if (!isEnding) {
-              setActiveParticipant(null);
-            }
-          }, data.audioDuration);
-        } else {
-          // Default timeout if no duration provided
-          setTimeout(() => {
-            if (!isEnding) {
-              setActiveParticipant(null);
-            }
-          }, 5000);
-        }
+      setActiveParticipant(data.agentId);
+      setCurrentTopic('AI Expert Discussion in Progress');
+      setConversationStatus('active');
+      setMessageCount(prev => prev + 1);
+      
+      // Play audio if available, speaker is on, and not paused
+      if (data.audio && isSpeakerOn && !isPaused) {
+        playAudio(data.audio, data.audioDuration || 5000);
+      } else if (data.audioDuration) {
+        // Even without audio, simulate the speaking duration
+        setTimeout(() => {
+          setActiveParticipant(null);
+        }, data.audioDuration);
+      } else {
+        // Default timeout if no duration provided
+        setTimeout(() => {
+          setActiveParticipant(null);
+        }, 5000);
       }
     });
 
     // Listen for conversation pause/resume
     newSocket.on('conversation-paused', () => {
-      if (!isEnding) {
-        setIsPaused(true);
-        if (currentAudio) {
-          currentAudio.pause();
-        }
+      setIsPaused(true);
+      if (currentAudio) {
+        currentAudio.pause();
       }
     });
 
     newSocket.on('conversation-resumed', () => {
-      if (!isEnding) {
-        setIsPaused(false);
-      }
+      setIsPaused(false);
     });
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
-      if (!isEnding) {
-        handleConversationEnd();
-      }
+      setConversationStatus('ended');
+      setCurrentTopic(data.message);
+      setActiveParticipant(null);
     });
 
     // Listen for session end
     newSocket.on('session-ended', () => {
-      if (!isEnding) {
-        handleCallEnd();
-      }
+      setIsCallActive(false);
     });
 
     // Start conversation
@@ -234,7 +153,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     });
 
     return () => {
-      // Cleanup on unmount
       if (currentAudio) {
         currentAudio.pause();
         currentAudio.src = '';
@@ -242,16 +160,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-      if (endingTimeoutRef.current) {
-        clearTimeout(endingTimeoutRef.current);
-      }
       newSocket.disconnect();
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
   const playAudio = (audioBase64: string, duration: number) => {
-    if (isEnding) return;
-    
     try {
       // Stop any currently playing audio
       if (currentAudio) {
@@ -267,38 +180,30 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        if (!isEnding) {
-          setActiveParticipant(null);
-        }
+        setActiveParticipant(null);
         setCurrentAudio(null);
       };
 
       audio.onerror = () => {
         console.error('Audio playback error');
         URL.revokeObjectURL(audioUrl);
-        if (!isEnding) {
-          setActiveParticipant(null);
-        }
+        setActiveParticipant(null);
         setCurrentAudio(null);
       };
       
       audio.play().catch(error => {
         console.error('Audio playback error:', error);
-        if (!isEnding) {
-          setActiveParticipant(null);
-        }
+        setActiveParticipant(null);
         setCurrentAudio(null);
       });
     } catch (error) {
       console.error('Audio processing error:', error);
-      if (!isEnding) {
-        setActiveParticipant(null);
-      }
+      setActiveParticipant(null);
     }
   };
 
   const toggleConversation = () => {
-    if (!socket || isEnding) return;
+    if (!socket) return;
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -312,9 +217,23 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     }
   };
 
+  const handleEndCall = () => {
+    setIsCallActive(false);
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    if (socket) {
+      socket.emit('end-session', sessionId);
+      socket.disconnect();
+    }
+    onEndCall();
+  };
+
   const toggleSpeaker = () => {
-    if (isEnding) return;
-    
     setIsSpeakerOn(!isSpeakerOn);
     if (!isSpeakerOn && currentAudio) {
       currentAudio.pause();
@@ -346,11 +265,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               <h2 className="text-xl font-bold">AI Expert Panel</h2>
               <div className="flex items-center space-x-3 mt-1">
                 <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                  isCallActive && !isEnding ? 'bg-green-500/20 text-green-100' : 'bg-red-500/20 text-red-100'
+                  isCallActive ? 'bg-green-500/20 text-green-100' : 'bg-red-500/20 text-red-100'
                 }`}>
-                  {isCallActive && !isEnding ? '🔴 Live' : isEnding ? '⏳ Ending...' : 'Ended'}
+                  {isCallActive ? '🔴 Live' : 'Ended'}
                 </span>
-                {conversationStatus === 'active' && !isEnding && (
+                {conversationStatus === 'active' && (
                   <span className={`px-3 py-1 text-xs rounded-full font-medium ${
                     isPaused ? 'bg-yellow-500/20 text-yellow-100' : 'bg-blue-500/20 text-blue-100'
                   }`}>
@@ -387,7 +306,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         <div className="flex items-center justify-center space-x-3 mt-4">
           <button
             onClick={toggleConversation}
-            disabled={!isCallActive || conversationStatus === 'ended' || isEnding}
+            disabled={!isCallActive || conversationStatus === 'ended'}
             className={`p-3 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
               isPaused 
                 ? 'bg-green-500 hover:bg-green-600 text-white' 
@@ -400,7 +319,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
           <button
             onClick={toggleSpeaker}
-            disabled={!isCallActive || isEnding}
+            disabled={!isCallActive}
             className={`p-3 rounded-xl transition-all duration-200 disabled:opacity-50 ${
               isSpeakerOn 
                 ? 'bg-white/20 hover:bg-white/30 text-white' 
@@ -412,21 +331,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           </button>
 
           <button
-            onClick={handleCallEnd}
-            disabled={isEnding}
-            className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleEndCall}
+            className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200"
             title="End Discussion"
           >
             <PhoneOff className="w-5 h-5" />
           </button>
         </div>
-
-        {/* Error Display */}
-        {routingError && (
-          <div className="mt-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg">
-            <p className="text-red-100 text-sm">{routingError}</p>
-          </div>
-        )}
       </div>
 
       {/* Participants Grid - Modern Design */}
@@ -436,13 +347,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <div
               key={participant.id}
               className={`relative bg-white rounded-2xl p-6 border-2 transition-all duration-300 ${
-                activeParticipant === participant.id && !isEnding
+                activeParticipant === participant.id 
                   ? 'border-blue-400 shadow-lg scale-105 bg-gradient-to-br from-blue-50 to-white' 
                   : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
               }`}
             >
               {/* Speaking Animation */}
-              {activeParticipant === participant.id && !isPaused && !isEnding && (
+              {activeParticipant === participant.id && !isPaused && (
                 <div className="absolute -top-2 -right-2">
                   <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center animate-pulse">
                     <div className="w-3 h-3 bg-white rounded-full"></div>
@@ -453,7 +364,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               {/* Avatar */}
               <div className="text-center mb-4">
                 <div className={`w-20 h-20 rounded-2xl flex items-center justify-center text-3xl mb-3 mx-auto transition-all duration-300 ${
-                  activeParticipant === participant.id && !isEnding
+                  activeParticipant === participant.id 
                     ? 'bg-gradient-to-br from-blue-100 to-purple-100 scale-110' 
                     : 'bg-slate-100'
                 }`}>
@@ -471,7 +382,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               {/* Status Indicator */}
               <div className="text-center">
-                {activeParticipant === participant.id && !isPaused && !isEnding ? (
+                {activeParticipant === participant.id && !isPaused ? (
                   <div className="space-y-2">
                     <div className="text-sm text-green-700 font-medium flex items-center justify-center space-x-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -504,34 +415,34 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             {currentTopic}
           </p>
           
-          {conversationStatus === 'preparing' && !isEnding && (
+          {conversationStatus === 'preparing' && (
             <div className="inline-flex items-center space-x-2 text-sm text-blue-600 bg-blue-50 px-4 py-2 rounded-full">
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
               <span>Analyzing content and preparing discussion...</span>
             </div>
           )}
           
-          {conversationStatus === 'active' && activeParticipant && !isPaused && !isEnding && (
+          {conversationStatus === 'active' && activeParticipant && !isPaused && (
             <div className="inline-flex items-center space-x-2 text-sm text-green-600 bg-green-50 px-4 py-2 rounded-full">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span>{participants.find(p => p.id === activeParticipant)?.name} is analyzing...</span>
             </div>
           )}
           
-          {isPaused && !isEnding && (
+          {isPaused && (
             <div className="inline-flex items-center space-x-2 text-sm text-yellow-600 bg-yellow-50 px-4 py-2 rounded-full">
               <Pause className="w-3 h-3" />
               <span>Discussion paused - Click play to resume</span>
             </div>
           )}
           
-          {(conversationStatus === 'ended' || isEnding) && (
+          {conversationStatus === 'ended' && (
             <div className="inline-flex items-center space-x-2 text-sm text-slate-600 bg-slate-100 px-4 py-2 rounded-full">
-              <span>{isEnding ? '⏳ Ending discussion...' : '✅ Expert discussion completed'}</span>
+              <span>✅ Expert discussion completed</span>
             </div>
           )}
 
-          {messageCount >= maxMessages && !isEnding && (
+          {messageCount >= maxMessages && (
             <div className="inline-flex items-center space-x-2 text-sm text-red-600 bg-red-50 px-4 py-2 rounded-full mt-2">
               <MessageCircle className="w-3 h-3" />
               <span>Discussion limit reached - Wrapping up</span>
