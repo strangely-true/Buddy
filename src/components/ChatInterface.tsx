@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare, Sparkles, ArrowDown } from 'lucide-react';
+import { Send, MessageSquare, Sparkles, ArrowDown, Bot, User } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -40,10 +40,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const agentColors = {
-    'chen': 'bg-purple-100 text-purple-800 border-purple-200',
-    'thompson': 'bg-blue-100 text-blue-800 border-blue-200',
-    'rodriguez': 'bg-green-100 text-green-800 border-green-200',
-    'kim': 'bg-orange-100 text-orange-800 border-orange-200'
+    'chen': 'from-purple-500/20 to-indigo-500/20 border-purple-500/30',
+    'thompson': 'from-blue-500/20 to-cyan-500/20 border-blue-500/30',
+    'rodriguez': 'from-green-500/20 to-emerald-500/20 border-green-500/30',
+    'kim': 'from-orange-500/20 to-red-500/20 border-orange-500/30'
   };
 
   const agentAvatars = {
@@ -154,8 +154,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const getAgentColor = (agentId?: string) => {
-    if (!agentId) return 'bg-slate-100 text-slate-800 border-slate-200';
-    return agentColors[agentId as keyof typeof agentColors] || 'bg-slate-100 text-slate-800 border-slate-200';
+    if (!agentId) return 'from-gray-700/50 to-gray-600/50 border-gray-600/30';
+    return agentColors[agentId as keyof typeof agentColors] || 'from-gray-700/50 to-gray-600/50 border-gray-600/30';
   };
 
   const getAgentAvatar = (agentId?: string) => {
@@ -164,17 +164,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden relative">
+    <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl border border-gray-700/50 h-full flex flex-col overflow-hidden relative shadow-2xl">
       {/* Modern Header */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4 flex-shrink-0">
+      <div className="bg-gradient-to-r from-gray-800/80 to-gray-700/80 backdrop-blur-xl text-white p-6 flex-shrink-0 border-b border-gray-600/30">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <MessageSquare className="w-5 h-5" />
+          <div className="flex items-center space-x-4">
+            <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg">
+              <MessageSquare className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h3 className="font-bold text-white">Discussion Chat</h3>
-              <p className="text-xs text-slate-300">Join the expert conversation</p>
+              <h3 className="font-bold text-white text-lg">Discussion Chat</h3>
+              <p className="text-sm text-gray-300 flex items-center space-x-1">
+                <Sparkles className="w-3 h-3" />
+                <span>Join the expert conversation</span>
+              </p>
             </div>
           </div>
         </div>
@@ -183,11 +186,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Messages Container with Scroll */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white scroll-smooth"
+        className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth"
         onScroll={handleScroll}
         style={{ 
           scrollBehavior: 'smooth',
-          maxHeight: 'calc(100vh - 300px)' // Ensure proper height calculation
+          maxHeight: 'calc(100vh - 300px)'
         }}
       >
         {messages.map((message) => (
@@ -196,52 +199,68 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl p-4 shadow-sm border transition-all duration-200 hover:shadow-md ${
+              className={`max-w-[85%] rounded-2xl p-5 shadow-lg border backdrop-blur-sm transition-all duration-200 hover:shadow-xl ${
                 message.type === 'user'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border-blue-600'
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white border-blue-500/30'
                   : message.type === 'system'
-                  ? 'bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 border-amber-200'
-                  : `${getAgentColor(message.agentId)} border`
+                  ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-200 border-amber-500/30'
+                  : `bg-gradient-to-r ${getAgentColor(message.agentId)} text-white border`
               }`}
             >
               {(message.type === 'ai' || message.type === 'system') && (
-                <div className="flex items-center space-x-2 mb-2">
-                  {message.type === 'ai' && (
-                    <span className="text-lg">{getAgentAvatar(message.agentId)}</span>
+                <div className="flex items-center space-x-3 mb-3">
+                  {message.type === 'ai' ? (
+                    <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+                      <span className="text-lg">{getAgentAvatar(message.agentId)}</span>
+                    </div>
+                  ) : (
+                    <div className="w-8 h-8 bg-amber-500/30 rounded-xl flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                    </div>
                   )}
-                  {message.type === 'system' && (
-                    <Sparkles className="w-4 h-4 text-amber-600" />
-                  )}
-                  <div className="text-xs font-bold opacity-90">
+                  <div className="text-sm font-bold opacity-90">
                     {message.sender}
                   </div>
                 </div>
               )}
+              
+              {message.type === 'user' && (
+                <div className="flex items-center space-x-3 mb-3">
+                  <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="text-sm font-bold opacity-90">
+                    You
+                  </div>
+                </div>
+              )}
+              
               <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                 {message.content}
               </div>
-              <div className={`text-xs mt-2 opacity-75 ${
+              <div className={`text-xs mt-3 opacity-75 ${
                 message.type === 'user' 
                   ? 'text-blue-100' 
                   : message.type === 'system'
-                  ? 'text-amber-600'
-                  : 'text-slate-500'
+                  ? 'text-amber-300'
+                  : 'text-gray-300'
               }`}>
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           </div>
         ))}
+        
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-gradient-to-r from-slate-100 to-slate-200 text-slate-800 rounded-2xl p-4 max-w-[85%] border border-slate-200">
-              <div className="flex items-center space-x-3">
+            <div className="bg-gradient-to-r from-gray-700/50 to-gray-600/50 border border-gray-600/30 text-white rounded-2xl p-5 max-w-[85%] backdrop-blur-sm">
+              <div className="flex items-center space-x-4">
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
-                <span className="text-sm text-slate-600 font-medium">Expert is analyzing...</span>
+                <span className="text-sm text-gray-300 font-medium">Expert is analyzing...</span>
               </div>
             </div>
           </div>
@@ -253,7 +272,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {showScrollButton && (
         <button
           onClick={enableAutoScroll}
-          className="absolute right-6 bottom-32 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 z-10 animate-bounce"
+          className="absolute right-6 bottom-32 bg-gradient-to-r from-purple-500 to-pink-500 text-white p-3 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-10 animate-bounce"
           title="Scroll to bottom"
         >
           <ArrowDown className="w-4 h-4" />
@@ -261,15 +280,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       )}
 
       {/* Modern Input */}
-      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200 flex-shrink-0">
-        <div className="flex items-end space-x-3">
+      <div className="p-6 bg-gradient-to-r from-gray-800/50 to-gray-700/50 border-t border-gray-600/30 flex-shrink-0">
+        <div className="flex items-end space-x-4">
           <div className="flex-1">
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Ask questions about the topic or request clarification..."
-              className="w-full p-4 border-2 border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white shadow-sm"
+              className="w-full p-4 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200 text-white placeholder-gray-400"
               rows={2}
               disabled={isProcessing}
               style={{ minHeight: '60px', maxHeight: '120px' }}
@@ -279,14 +298,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isProcessing}
-            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
+            className="p-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-2xl hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
             title="Send Message"
           >
             <Send className="w-5 h-5" />
           </button>
         </div>
         
-        <div className="mt-3 text-xs text-slate-500 flex items-center space-x-2">
+        <div className="mt-4 text-xs text-gray-400 flex items-center space-x-2">
           <Sparkles className="w-3 h-3" />
           <span>Ask specific questions to guide the expert discussion or request deeper analysis</span>
         </div>

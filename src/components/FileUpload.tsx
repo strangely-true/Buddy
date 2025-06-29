@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, File, Image, Type, Loader2, AlertCircle, X, Settings } from 'lucide-react';
+import { Upload, File, Image, Type, Loader2, AlertCircle, X, Settings, Sparkles, Zap } from 'lucide-react';
 import axios from 'axios';
 
 interface FileUploadProps {
@@ -223,25 +223,27 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <h4 className="text-red-800 font-medium">Error</h4>
-            <p className="text-red-700 text-sm mt-1">{error}</p>
+        <div className="bg-gradient-to-r from-red-500/10 to-pink-500/10 border border-red-500/20 rounded-2xl p-6 backdrop-blur-sm">
+          <div className="flex items-start space-x-4">
+            <AlertCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-red-300 font-semibold text-lg mb-1">Error</h4>
+              <p className="text-red-200/80">{error}</p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Combined Input Area */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+      {/* Main Input Card */}
+      <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden shadow-2xl">
         {/* File Upload Zone */}
         <div
-          className={`relative border-2 border-dashed rounded-t-xl p-8 text-center transition-all duration-300 ${
+          className={`relative border-2 border-dashed rounded-t-3xl p-12 text-center transition-all duration-300 ${
             dragActive 
-              ? 'border-blue-400 bg-blue-50' 
-              : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'
+              ? 'border-blue-400/50 bg-blue-500/10' 
+              : 'border-gray-600/50 hover:border-gray-500/50 hover:bg-gray-700/30'
           }`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
@@ -257,50 +259,69 @@ const FileUpload: React.FC<FileUploadProps> = ({
             disabled={uploading}
           />
           
-          <Upload className="w-8 h-8 mx-auto mb-3 text-slate-400" />
-          <p className="text-sm text-slate-600">
-            Drop files here or click to upload (optional)
-          </p>
-          <div className="flex items-center justify-center space-x-4 text-xs mt-2 text-slate-500">
-            <div className="flex items-center space-x-1">
-              <File className="w-3 h-3" />
-              <span>Text Files</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <Image className="w-3 h-3" />
-              <span>Images</span>
-            </div>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Supported: .txt, .md, .csv, .json, .jpg, .png, .webp
-          </p>
-          {!isApiKeyConfigured && (
-            <p className="text-xs text-amber-600 mt-2 font-medium">
-              Files will be processed locally without API key
+          <div className="relative">
+            <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+            <h3 className="text-xl font-semibold text-white mb-2">
+              Drop files here or click to upload
+            </h3>
+            <p className="text-gray-300 mb-4">
+              Add documents or images to enhance your AI discussion
             </p>
-          )}
+            <div className="flex items-center justify-center space-x-6 text-sm text-gray-400">
+              <div className="flex items-center space-x-2">
+                <File className="w-4 h-4" />
+                <span>Text Files</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Image className="w-4 h-4" />
+                <span>Images</span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              Supported: .txt, .md, .csv, .json, .jpg, .png, .webp
+            </p>
+            {!isApiKeyConfigured && (
+              <div className="mt-4 inline-flex items-center space-x-2 px-4 py-2 bg-amber-500/20 border border-amber-500/30 rounded-xl">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span className="text-sm text-amber-300 font-medium">
+                  Files processed locally without API key
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Uploaded Files Display */}
         {uploadedFiles.length > 0 && (
-          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-            <h4 className="text-sm font-medium text-slate-700 mb-2">Uploaded Files:</h4>
-            <div className="space-y-2">
+          <div className="px-8 py-6 border-b border-gray-700/50 bg-gray-700/30">
+            <h4 className="text-lg font-semibold text-white mb-4 flex items-center space-x-2">
+              <Sparkles className="w-5 h-5 text-purple-400" />
+              <span>Uploaded Files</span>
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {uploadedFiles.map((uploadedFile, index) => (
-                <div key={index} className="flex items-center justify-between bg-white rounded-lg p-2 border border-slate-200">
-                  <div className="flex items-center space-x-2">
+                <div key={index} className="flex items-center justify-between bg-gray-800/50 rounded-xl p-4 border border-gray-600/30">
+                  <div className="flex items-center space-x-3">
                     {uploadedFile.file.type.startsWith('image/') ? (
-                      <Image className="w-4 h-4 text-green-600" />
+                      <div className="w-8 h-8 bg-gradient-to-r from-green-400 to-emerald-400 rounded-lg flex items-center justify-center">
+                        <Image className="w-4 h-4 text-white" />
+                      </div>
                     ) : (
-                      <File className="w-4 h-4 text-blue-600" />
+                      <div className="w-8 h-8 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-lg flex items-center justify-center">
+                        <File className="w-4 h-4 text-white" />
+                      </div>
                     )}
-                    <span className="text-sm text-slate-700">{uploadedFile.file.name}</span>
-                    <span className="text-xs text-slate-500">({(uploadedFile.file.size / 1024).toFixed(1)} KB)</span>
-                    <span className="text-xs text-green-600">✓ Processed</span>
+                    <div>
+                      <span className="text-white font-medium">{uploadedFile.file.name}</span>
+                      <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-gray-400">({(uploadedFile.file.size / 1024).toFixed(1)} KB)</span>
+                        <span className="text-green-400 font-medium">✓ Processed</span>
+                      </div>
+                    </div>
                   </div>
                   <button
                     onClick={() => removeFile(index)}
-                    className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+                    className="p-2 text-gray-400 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
                     disabled={uploading}
                   >
                     <X className="w-4 h-4" />
@@ -312,41 +333,47 @@ const FileUpload: React.FC<FileUploadProps> = ({
         )}
 
         {/* Text Input Area */}
-        <div className="p-6">
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0 mt-1">
-              <Type className="w-5 h-5 text-slate-400" />
+        <div className="p-8">
+          <div className="flex items-start space-x-4">
+            <div className="flex-shrink-0 mt-2">
+              <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+                <Type className="w-5 h-5 text-white" />
+              </div>
             </div>
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 space-y-6">
               <textarea
                 value={textPrompt}
                 onChange={(e) => setTextPrompt(e.target.value)}
-                placeholder="Describe a topic, ask a question, or provide context for your uploaded files. The AI experts will create a focused discussion around your input..."
-                className="w-full h-32 p-4 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
+                placeholder="Describe your topic, ask questions, or provide context for your files. Our AI experts will create a focused discussion around your input..."
+                className="w-full h-40 p-6 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 disabled:bg-gray-800/50 disabled:text-gray-400 text-white placeholder-gray-400 transition-all duration-200"
                 disabled={uploading}
               />
               
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-4 sm:space-y-0 sm:space-x-4">
                 <button
                   onClick={() => setShowPersonalityConfig(!showPersonalityConfig)}
-                  className="flex items-center space-x-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+                  className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors group"
                 >
-                  <Settings className="w-4 h-4" />
-                  <span>Configure AI Personalities (Optional)</span>
+                  <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-200" />
+                  <span className="text-sm font-medium">Configure AI Personalities</span>
+                  <span className="text-xs text-gray-500">(Optional)</span>
                 </button>
                 
                 <button
                   onClick={handleSubmit}
                   disabled={(!textPrompt.trim() && uploadedFiles.length === 0) || uploading}
-                  className="bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white rounded-2xl font-semibold hover:from-blue-600 hover:via-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
                 >
                   {uploading ? (
-                    <div className="flex items-center space-x-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Starting AI Discussion...</span>
+                    <div className="flex items-center justify-center space-x-3">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Initializing AI Discussion...</span>
                     </div>
                   ) : (
-                    'Start Focused AI Discussion'
+                    <div className="flex items-center justify-center space-x-3">
+                      <Sparkles className="w-5 h-5" />
+                      <span>Start AI Expert Discussion</span>
+                    </div>
                   )}
                 </button>
               </div>
@@ -360,18 +387,29 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <PersonalityConfig />
       )}
 
-      {/* Tips */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h4 className="text-blue-800 font-medium mb-2">💡 Tips for Focused Discussions</h4>
-        <ul className="text-blue-700 text-sm space-y-1">
-          <li>• Be specific about what aspects you want the experts to focus on</li>
-          <li>• Upload relevant documents or images to provide context</li>
-          <li>• Ask targeted questions to guide the expert analysis</li>
-          <li>• The discussion will stay focused on your topic - experts won't deviate</li>
+      {/* Tips Card */}
+      <div className="bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 border border-blue-500/20 rounded-2xl p-6 backdrop-blur-sm">
+        <h4 className="text-blue-300 font-semibold text-lg mb-4 flex items-center space-x-2">
+          <Sparkles className="w-5 h-5" />
+          <span>Tips for Engaging Discussions</span>
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-200/80">
+          <div className="space-y-2">
+            <p>• Be specific about focus areas for expert analysis</p>
+            <p>• Upload relevant documents for deeper context</p>
+          </div>
+          <div className="space-y-2">
+            <p>• Ask targeted questions to guide discussions</p>
+            <p>• Experts maintain focus on your chosen topic</p>
+          </div>
           {!isApiKeyConfigured && (
-            <li>• <strong>Without API key:</strong> Basic discussion mode with default responses</li>
+            <div className="md:col-span-2 mt-2 p-3 bg-amber-500/20 border border-amber-500/30 rounded-xl">
+              <p className="text-amber-300 font-medium">
+                <strong>Demo Mode:</strong> Basic discussion with default responses (API key required for full experience)
+              </p>
+            </div>
           )}
-        </ul>
+        </div>
       </div>
     </div>
   );
@@ -426,66 +464,85 @@ const PersonalityConfig: React.FC = () => {
     window.location.reload();
   };
 
+  const agentColors = {
+    chen: 'from-purple-500 to-indigo-500',
+    thompson: 'from-blue-500 to-cyan-500',
+    rodriguez: 'from-green-500 to-emerald-500',
+    kim: 'from-orange-500 to-red-500'
+  };
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-slate-800">AI Expert Personalities</h3>
+    <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl border border-gray-700/50 p-8">
+      <div className="flex items-center justify-between mb-8">
+        <h3 className="text-2xl font-bold text-white flex items-center space-x-3">
+          <Settings className="w-6 h-6 text-purple-400" />
+          <span>AI Expert Personalities</span>
+        </h3>
         <button
           onClick={resetToDefaults}
-          className="text-sm text-slate-600 hover:text-slate-800 underline"
+          className="px-4 py-2 text-gray-300 hover:text-white border border-gray-600/50 hover:border-gray-500/50 rounded-xl transition-colors"
         >
           Reset to Defaults
         </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {Object.entries(personalities).map(([agentId, agent]) => (
-          <div key={agentId} className="space-y-3 p-4 border border-slate-200 rounded-lg">
+          <div key={agentId} className="space-y-4 p-6 bg-gray-700/30 border border-gray-600/30 rounded-2xl">
+            <div className={`w-12 h-12 bg-gradient-to-r ${agentColors[agentId as keyof typeof agentColors]} rounded-xl flex items-center justify-center mb-4`}>
+              <span className="text-white font-bold text-lg">
+                {agent.name.split(' ').map(n => n[0]).join('')}
+              </span>
+            </div>
+            
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Name</label>
               <input
                 type="text"
                 value={agent.name}
                 onChange={(e) => handlePersonalityChange(agentId, 'name', e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-3 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200"
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Role</label>
               <input
                 type="text"
                 value={agent.role}
                 onChange={(e) => handlePersonalityChange(agentId, 'role', e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-3 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200"
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Personality</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Personality</label>
               <textarea
                 value={agent.personality}
                 onChange={(e) => handlePersonalityChange(agentId, 'personality', e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                rows={2}
+                className="w-full p-3 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200"
+                rows={3}
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Expertise</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Expertise</label>
               <textarea
                 value={agent.expertise}
                 onChange={(e) => handlePersonalityChange(agentId, 'expertise', e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                rows={2}
+                className="w-full p-3 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200"
+                rows={3}
               />
             </div>
           </div>
         ))}
       </div>
       
-      <div className="mt-4 text-sm text-slate-600">
-        <p>💡 Customize how each AI expert behaves and responds. Changes are saved automatically.</p>
+      <div className="mt-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+        <p className="text-blue-300 text-sm flex items-center space-x-2">
+          <Sparkles className="w-4 h-4" />
+          <span>Customize how each AI expert behaves and responds. Changes are saved automatically and apply to new discussions.</span>
+        </p>
       </div>
     </div>
   );

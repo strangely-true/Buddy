@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { MessageCircle, Settings } from 'lucide-react'
+import { MessageCircle, Settings, Sparkles } from 'lucide-react'
 import Header from './components/Header'
 import ConferenceRoom from './components/ConferenceRoom'
 import FileUpload from './components/FileUpload'
@@ -56,36 +56,44 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
       <Header onShowApiKeys={handleShowApiKeyModal} />
       
       {currentView === 'upload' && (
-        <div className="container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="mb-8 text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <MessageCircle className="w-8 h-8 text-white" />
+        <div className="container mx-auto px-4 py-8 lg:py-16">
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-12 text-center">
+              <div className="relative mb-8">
+                <div className="w-20 h-20 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
+                  <MessageCircle className="w-10 h-10 text-white" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-2xl blur-xl opacity-50 animate-pulse"></div>
+                </div>
+                <h1 className="text-5xl lg:text-7xl font-bold bg-gradient-to-r from-white via-gray-100 to-gray-300 bg-clip-text text-transparent mb-6 leading-tight">
+                  AI Expert
+                  <span className="block bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+                    Conference
+                  </span>
+                </h1>
+                <p className="text-xl lg:text-2xl text-gray-300 max-w-3xl mx-auto leading-relaxed">
+                  Transform your documents into dynamic AI discussions with expert perspectives
+                </p>
               </div>
-              <h1 className="text-4xl font-bold text-slate-800 mb-2">
-                AI Expert Conference
-              </h1>
-              <p className="text-slate-600 text-lg">
-                Upload documents or enter a topic to start your AI discussion
-              </p>
             </div>
             
             {!geminiApiKey && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-8">
-                <div className="flex items-center space-x-3">
-                  <Settings className="w-6 h-6 text-amber-600" />
-                  <div>
-                    <h3 className="font-semibold text-amber-800">API Keys Required</h3>
-                    <p className="text-amber-700 text-sm mt-1">
-                      Configure your Gemini API key to start creating AI conferences. ElevenLabs is optional for voice synthesis.
+              <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl p-6 lg:p-8 mb-8 backdrop-blur-sm">
+                <div className="flex items-start space-x-4">
+                  <div className="w-12 h-12 bg-gradient-to-r from-amber-400 to-orange-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Settings className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-amber-300 text-lg mb-2">API Configuration Required</h3>
+                    <p className="text-amber-200/80 mb-4 leading-relaxed">
+                      Configure your Gemini API key to unlock the full AI conference experience. ElevenLabs is optional for voice synthesis.
                     </p>
                     <button
                       onClick={handleShowApiKeyModal}
-                      className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 transition-colors"
+                      className="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:from-amber-600 hover:to-orange-600 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
                     >
                       Configure API Keys
                     </button>
@@ -106,8 +114,8 @@ function App() {
 
       {currentView === 'conference' && hasSession && (
         <div className="container mx-auto px-4 py-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
-            <div className="lg:col-span-2">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
+            <div className="xl:col-span-2">
               <ConferenceRoom 
                 onEndCall={handleConversationEnd} 
                 sessionId={sessionId}
@@ -116,7 +124,7 @@ function App() {
                 onConversationEnd={handleConversationEnd}
               />
             </div>
-            <div className="lg:col-span-1">
+            <div className="xl:col-span-1">
               <ChatInterface 
                 sessionId={sessionId}
                 geminiApiKey={geminiApiKey}
@@ -134,6 +142,13 @@ function App() {
         currentGeminiKey={geminiApiKey}
         currentElevenLabsKey={elevenLabsApiKey}
       />
+
+      {/* Ambient Background Effects */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute top-3/4 left-1/2 w-96 h-96 bg-pink-500/5 rounded-full blur-3xl animate-pulse delay-2000"></div>
+      </div>
     </div>
   )
 }
