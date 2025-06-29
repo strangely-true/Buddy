@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, MessageSquare } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
-import { useAuth } from '../contexts/AuthContext';
-import { ConversationService } from '../lib/conversationService';
 
 interface Message {
   id: string;
@@ -23,7 +21,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   geminiApiKey, 
   elevenLabsApiKey 
 }) => {
-  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -37,7 +34,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -60,38 +56,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  // Load existing conversation messages
-  useEffect(() => {
-    if (user && sessionId) {
-      const loadConversationMessages = async () => {
-        try {
-          const conversation = await ConversationService.getConversationBySessionId(sessionId);
-          if (conversation) {
-            setConversationId(conversation.id!);
-            const conversationMessages = await ConversationService.getConversationMessages(conversation.id!);
-            
-            // Convert database messages to chat messages
-            const chatMessages = conversationMessages.map(msg => ({
-              id: msg.id!,
-              content: msg.message_content,
-              sender: msg.speaker_name,
-              timestamp: new Date(msg.timestamp!),
-              type: msg.message_type as 'user' | 'ai' | 'system'
-            }));
-            
-            if (chatMessages.length > 0) {
-              setMessages(prev => [...prev, ...chatMessages]);
-            }
-          }
-        } catch (error) {
-          console.error('Error loading conversation messages:', error);
-        }
-      };
-      
-      loadConversationMessages();
-    }
-  }, [user, sessionId]);
-
   useEffect(() => {
     // Initialize socket connection
     const newSocket = io('http://localhost:3001');
@@ -112,22 +76,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setMessages(prev => [...prev, aiMessage]);
     });
 
-    // Listen for user messages (for synchronization)
-    newSocket.on('user-message', (data) => {
-      // Message already added locally, just store in database if needed
-      if (user && conversationId) {
-        ConversationService.addMessage({
-          conversation_id: conversationId,
-          speaker_id: 'user',
-          speaker_name: 'You',
-          message_content: data.message,
-          message_type: 'user'
-        }).catch(error => {
-          console.error('Error storing user message:', error);
-        });
-      }
-    });
-
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
       const systemMessage: Message = {
@@ -143,7 +91,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => {
       newSocket.disconnect();
     };
-  }, [sessionId, user, conversationId]);
+  }, [sessionId]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isProcessing || !socket) return;
@@ -185,7 +133,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col max-h-full">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-slate-200 flex-shrink-0">
         <div className="flex items-center justify-between">
@@ -207,8 +155,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
+        className="flex-1 overflow-y-auto p-4 space-y-3"
         onScroll={handleScroll}
+        style={{ minHeight: 0 }}
       >
         {messages.map((message) => (
           <div

@@ -47,11 +47,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(session?.user ?? null)
       setLoading(false)
 
-      // Create or update user profile
-      if (session?.user && event === 'SIGNED_IN') {
-        await createOrUpdateUserProfile(session.user)
-      }
-
       // Handle sign out
       if (event === 'SIGNED_OUT') {
         // Clear any cached data
@@ -63,26 +58,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     return () => subscription.unsubscribe()
   }, [])
-
-  const createOrUpdateUserProfile = async (user: User) => {
-    try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .upsert({
-          id: user.id,
-          email: user.email!,
-          full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-          avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
-          updated_at: new Date().toISOString(),
-        })
-
-      if (error) {
-        console.error('Error creating/updating user profile:', error)
-      }
-    } catch (error) {
-      console.error('Error in createOrUpdateUserProfile:', error)
-    }
-  }
 
   const signInWithGoogle = async () => {
     try {
@@ -115,11 +90,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Clear state immediately
       setUser(null)
       setSession(null)
-      
-      // Force a complete page reload to clear all state
-      setTimeout(() => {
-        window.location.href = '/'
-      }, 100)
+      setLoading(false)
       
     } catch (error) {
       console.error('Error signing out:', error)

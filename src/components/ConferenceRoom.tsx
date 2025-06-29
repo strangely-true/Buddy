@@ -3,7 +3,6 @@ import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock } from 'lucide-re
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 import { useAuth } from '../contexts/AuthContext';
-import { ConversationService } from '../lib/conversationService';
 
 interface ConferenceRoomProps {
   onEndCall: () => void;
@@ -29,7 +28,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [discussionTime, setDiscussionTime] = useState(0);
   const [maxDiscussionTime] = useState(15 * 60); // 15 minutes in seconds
-  const [conversationId, setConversationId] = useState<string | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const cleanupRef = useRef<boolean>(false);
 
@@ -47,7 +45,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         setDiscussionTime(prev => {
           const newTime = prev + 1;
           if (newTime >= maxDiscussionTime) {
-            // Auto-end discussion after 15 minutes
             handleEndCall();
             return maxDiscussionTime;
           }
@@ -110,6 +107,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   useEffect(() => {
+    if (cleanupRef.current) return;
+
     // Initialize socket connection
     const newSocket = io('http://localhost:3001');
     setSocket(newSocket);
@@ -124,20 +123,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Expert Discussion in Progress');
       setConversationStatus('active');
-      
-      // Store message in database if user is logged in
-      if (user && conversationId) {
-        ConversationService.addMessage({
-          conversation_id: conversationId,
-          speaker_id: data.agentId,
-          speaker_name: data.agentName,
-          message_content: data.message,
-          message_type: 'ai',
-          audio_duration: data.audioDuration || 0
-        }).catch(error => {
-          console.error('Error storing agent message:', error);
-        });
-      }
       
       // Play audio if available, speaker is on, and not paused
       if (data.audio && isSpeakerOn && !isPaused) {
@@ -179,13 +164,6 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       setConversationStatus('ended');
       setCurrentTopic(data.message);
       setActiveParticipant(null);
-      
-      // Update conversation status in database
-      if (user) {
-        ConversationService.updateConversationStatus(sessionId, 'completed').catch(error => {
-          console.error('Error updating conversation status:', error);
-        });
-      }
     });
 
     // Listen for session end
@@ -205,29 +183,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     return () => {
       cleanupResources();
     };
-  }, [sessionId, geminiApiKey, elevenLabsApiKey, user?.id]);
-
-  // Create conversation in database when component mounts
-  useEffect(() => {
-    if (user && sessionId && !conversationId) {
-      // Get conversation data from session storage or create new one
-      const createConversation = async () => {
-        try {
-          const existingConversation = await ConversationService.getConversationBySessionId(sessionId);
-          if (existingConversation) {
-            setConversationId(existingConversation.id!);
-          } else {
-            // This will be created when the session starts on the server
-            setConversationId(sessionId);
-          }
-        } catch (error) {
-          console.error('Error setting up conversation:', error);
-        }
-      };
-      
-      createConversation();
-    }
-  }, [user, sessionId, conversationId]);
+  }, [sessionId, geminiApiKey, elevenLabsApiKey, user?.id, isSpeakerOn, isPaused]);
 
   const playAudio = (audioBase64: string, duration: number) => {
     if (cleanupRef.current) return;

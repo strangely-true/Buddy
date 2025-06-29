@@ -23,14 +23,14 @@ app.use(express.json());
 // Store active sessions
 const sessions = new Map();
 
-// AI Agents configuration with unique voices and DISTINCT system prompts
+// AI Agents configuration with DISTINCT system prompts and personalities
 const agents = [
   {
     id: 'chen',
     name: 'Dr. Sarah Chen',
     role: 'Research Analyst',
-    personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
-    expertise: 'research methodology, data analysis, statistical significance, peer review standards',
+    personality: 'methodical, evidence-based, asks probing questions about data validity',
+    expertise: 'research methodology, data analysis, statistical significance',
     voiceId: 'EXAVITQu4vr4xnSDxMaL',
     systemPrompt: `You are Dr. Sarah Chen, a meticulous Research Analyst with a PhD in Data Science. Your approach is:
 
@@ -60,9 +60,9 @@ Stay strictly within the topic boundaries. Challenge other experts' claims by as
     name: 'Marcus Thompson',
     role: 'Strategy Expert',
     personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
-    expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment',
+    expertise: 'business strategy, market dynamics, competitive analysis',
     voiceId: 'pNInz6obpgDQGcFmaJgB',
-    systemPrompt: `You are Marcus Thompson, a seasoned Strategy Expert with 15+ years in corporate strategy and consulting. Your approach is:
+    systemPrompt: `You are Marcus Thompson, a seasoned Strategy Expert with 15+ years in corporate strategy. Your approach is:
 
 CORE IDENTITY:
 - Pragmatic and results-oriented
@@ -89,10 +89,10 @@ Stay strictly within the topic boundaries. Challenge other experts by questionin
     id: 'rodriguez',
     name: 'Prof. Elena Rodriguez',
     role: 'Domain Specialist',
-    personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
-    expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections',
+    personality: 'theoretical, comprehensive, provides deep contextual background',
+    expertise: 'theoretical frameworks, academic literature, conceptual foundations',
     voiceId: 'XB0fDUnXU5powFXDhCwa',
-    systemPrompt: `You are Prof. Elena Rodriguez, a distinguished academic with expertise in theoretical frameworks and interdisciplinary research. Your approach is:
+    systemPrompt: `You are Prof. Elena Rodriguez, a distinguished academic with expertise in theoretical frameworks. Your approach is:
 
 CORE IDENTITY:
 - Theoretical and comprehensive in analysis
@@ -113,14 +113,14 @@ FOCUS AREAS:
 - Interdisciplinary connections and synthesis
 - Academic literature and scholarly perspectives
 
-Stay strictly within the topic boundaries. Provide theoretical depth and academic context to ground the discussion in established scholarship.`
+Stay strictly within the topic boundaries. Provide theoretical depth and academic context to ground the discussion.`
   },
   {
     id: 'kim',
     name: 'Alex Kim',
     role: 'Innovation Lead',
-    personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
-    expertise: 'emerging technologies, future trends, disruptive innovation, technological implications',
+    personality: 'forward-thinking, disruptive, challenges conventional thinking',
+    expertise: 'emerging technologies, future trends, disruptive innovation',
     voiceId: 'onwK4e9ZLuTAKqWW03F9',
     systemPrompt: `You are Alex Kim, a visionary Innovation Lead focused on emerging technologies and future trends. Your approach is:
 
@@ -143,7 +143,7 @@ FOCUS AREAS:
 - Novel applications and use cases
 - Technological transformation possibilities
 
-Stay strictly within the topic boundaries. Challenge other experts by introducing innovative perspectives and future possibilities within the topic scope.`
+Stay strictly within the topic boundaries. Challenge other experts by introducing innovative perspectives and future possibilities.`
   }
 ];
 
@@ -231,36 +231,7 @@ function estimateAudioDuration(text) {
   return Math.max(durationSeconds * 1000, 2500);
 }
 
-// Generate conversation title from content
-function generateConversationTitle(content, contentType) {
-  const maxLength = 60;
-  
-  if (contentType === 'multimodal') {
-    return 'Multimodal Analysis Discussion';
-  }
-  
-  const textContent = typeof content === 'object' ? content.text : content;
-  
-  // Extract first meaningful sentence or phrase
-  const sentences = textContent.split(/[.!?]+/);
-  const firstSentence = sentences[0]?.trim();
-  
-  if (firstSentence && firstSentence.length <= maxLength) {
-    return firstSentence;
-  }
-  
-  // Truncate and add ellipsis
-  const truncated = textContent.substring(0, maxLength).trim();
-  const lastSpace = truncated.lastIndexOf(' ');
-  
-  if (lastSpace > maxLength * 0.7) {
-    return truncated.substring(0, lastSpace) + '...';
-  }
-  
-  return truncated + '...';
-}
-
-// Process content with multimodal support and database storage
+// Process content and create discussion framework
 app.post('/api/process-content', async (req, res) => {
   try {
     const { content, type, sessionId, geminiApiKey, userId } = req.body;
@@ -271,43 +242,9 @@ app.post('/api/process-content', async (req, res) => {
 
     const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    let analysisPrompt;
-    let multimodalContent = [];
+    const analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
 
-    if (type === 'multimodal' && content.images && content.images.length > 0) {
-      analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
-
-Text content: ${content.text}
-
-For the uploaded images, analyze their content, context, and relevance to the text.
-
-Create a structured analysis for expert discussion:
-1. Core topic definition (be very specific - this defines the discussion boundaries)
-2. Key discussion points (3-4 focused areas only)
-3. Expert perspectives needed (research, strategy, academic, innovation angles)
-4. Specific questions or challenges to explore within this topic
-5. Discussion boundaries - what should NOT be discussed to maintain focus
-
-CRITICAL: The discussion must stay strictly within this topic scope. Experts should not deviate to general or unrelated topics. Define clear boundaries.
-
-Time limit: 5-15 minutes of focused expert discussion.`;
-
-      multimodalContent.push({ text: analysisPrompt });
-
-      content.images.forEach(image => {
-        multimodalContent.push({
-          inlineData: {
-            mimeType: image.mimeType,
-            data: image.data
-          }
-        });
-      });
-    } else {
-      const textContent = typeof content === 'object' ? content.text : content;
-      
-      analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
-
-${textContent}
+${content}
 
 Create a structured analysis for expert discussion:
 1. Core topic definition (be very specific - this defines the discussion boundaries)
@@ -320,18 +257,14 @@ CRITICAL: The experts must stay strictly within this topic scope and not deviate
 
 Time limit: 5-15 minutes of focused expert discussion.`;
 
-      multimodalContent = [{ text: analysisPrompt }];
-    }
-
     const response = await genAI.models.generateContent({
       model: "gemini-2.0-flash",
-      contents: multimodalContent,
+      contents: analysisPrompt,
     });
 
     const analysis = response.text;
-    const title = generateConversationTitle(content, type);
 
-    // Store session data with time limits
+    // Store session data
     sessions.set(sessionId, {
       topic: analysis,
       conversationHistory: [],
@@ -339,72 +272,19 @@ Time limit: 5-15 minutes of focused expert discussion.`;
       isActive: true,
       isPaused: false,
       currentSpeaker: null,
-      conversationQueue: [],
       totalMessages: 0,
       maxMessages: 18,
       nextTimeout: null,
       topicBoundaries: analysis,
       startTime: Date.now(),
       maxDuration: 15 * 60 * 1000,
-      userId: userId,
-      title: title,
-      contentType: type,
-      conversationId: null // Will be set when conversation is created in database
+      userId: userId
     });
 
-    res.json({ success: true, analysis, title });
+    res.json({ success: true, analysis });
   } catch (error) {
     console.error('Content processing error:', error);
     res.status(500).json({ error: 'Failed to process content' });
-  }
-});
-
-// Create conversation in database
-app.post('/api/create-conversation', async (req, res) => {
-  try {
-    const { sessionId, userId, title, topicAnalysis, contentType } = req.body;
-    
-    const session = sessions.get(sessionId);
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
-    // Store conversation ID in session for message storage
-    session.conversationId = sessionId; // Using sessionId as conversation identifier
-    
-    res.json({ success: true, conversationId: sessionId });
-  } catch (error) {
-    console.error('Error creating conversation:', error);
-    res.status(500).json({ error: 'Failed to create conversation' });
-  }
-});
-
-// Get conversation history
-app.get('/api/conversation/:sessionId/messages', async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const session = sessions.get(sessionId);
-    
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
-    // Return conversation history from session
-    const messages = session.conversationHistory.map((msg, index) => {
-      const [speaker, ...contentParts] = msg.split(': ');
-      return {
-        id: `msg_${index}`,
-        speaker_name: speaker,
-        message_content: contentParts.join(': '),
-        timestamp: new Date(Date.now() - (session.conversationHistory.length - index) * 30000).toISOString(),
-        sequence_number: index + 1
-      };
-    });
-
-    res.json({ messages });
-  } catch (error) {
-    console.error('Error getting conversation messages:', error);
-    res.status(500).json({ error: 'Failed to get messages' });
   }
 });
 
@@ -427,30 +307,6 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Create conversation in database if userId is provided
-      if (userId) {
-        try {
-          const response = await fetch('http://localhost:3001/api/create-conversation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              userId,
-              title: session.title,
-              topicAnalysis: session.topic,
-              contentType: session.contentType
-            })
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            session.conversationId = result.conversationId;
-          }
-        } catch (error) {
-          console.error('Error creating conversation in database:', error);
-        }
-      }
-
       const openingAgent = agents[0]; // Dr. Chen
       const openingPrompt = `${openingAgent.systemPrompt}
 
@@ -517,11 +373,6 @@ Your opening statement:`;
 
       session.conversationHistory.push(`User: ${message}`);
 
-      io.to(sessionId).emit('user-message', {
-        message,
-        timestamp: new Date()
-      });
-
       session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
       }, 1500);
@@ -560,15 +411,13 @@ Your opening statement:`;
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
-      session.status = 'completed';
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
       }
       
-      // Keep session data for a while for potential database storage
       setTimeout(() => {
         sessions.delete(sessionId);
-      }, 60000); // Delete after 1 minute
+      }, 60000);
     }
     io.to(sessionId).emit('session-ended');
   });
@@ -578,7 +427,7 @@ Your opening statement:`;
   });
 });
 
-// Synchronized conversation function with time limits
+// Synchronized conversation function
 async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused) {
@@ -588,7 +437,6 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   // Check time limit
   const elapsed = Date.now() - session.startTime;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
-    session.status = 'completed';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -612,7 +460,6 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   // Check limits
   const elapsed = Date.now() - session.startTime;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
-    session.status = 'completed';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -673,7 +520,6 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       }, audioDuration + 2000);
     } else {
       // End conversation
-      session.status = 'completed';
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'

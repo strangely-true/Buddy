@@ -5,13 +5,13 @@ import { SessionProvider } from './contexts/SessionContext'
 import Header from './components/Header'
 import Dashboard from './components/dashboard/Dashboard'
 import ConferenceRoom from './components/ConferenceRoom'
-import FileUpload from './components/FileUpload'
+import TextPrompt from './components/TextPrompt'
 import ChatInterface from './components/ChatInterface'
 import ApiKeyModal from './components/ApiKeyModal'
 
 function AppContent() {
   const { user, loading } = useAuth()
-  const [currentView, setCurrentView] = useState<'dashboard' | 'upload' | 'conference'>('dashboard')
+  const [currentView, setCurrentView] = useState<'dashboard' | 'prompt' | 'conference'>('dashboard')
   const [hasSession, setHasSession] = useState(false)
   const [showApiKeyModal, setShowApiKeyModal] = useState(false)
   const [geminiApiKey, setGeminiApiKey] = useState('')
@@ -34,26 +34,21 @@ function AppContent() {
   }
 
   const handleEndCall = () => {
-    // Clear session state first
     setHasSession(false)
     setSessionId('')
-    
-    // Use setTimeout to ensure state is cleared before navigation
-    setTimeout(() => {
-      setCurrentView('dashboard')
-    }, 100)
+    setCurrentView('dashboard')
   }
 
   const handleStartNewConference = () => {
-    // Clear any existing session state
     setHasSession(false)
     setSessionId('')
-    setCurrentView('upload')
+    setCurrentView('prompt')
   }
 
   const handleResumeConference = (sessionId: string) => {
-    // TODO: Implement resume functionality
     console.log('Resume conference:', sessionId)
+    // For now, just start a new conference
+    handleStartNewConference()
   }
 
   const handleApiKeySave = (geminiKey: string, elevenLabsKey?: string) => {
@@ -94,7 +89,7 @@ function AppContent() {
             />
           )}
 
-          {currentView === 'upload' && (
+          {currentView === 'prompt' && (
             <div className="container mx-auto px-4 py-8">
               <div className="max-w-4xl mx-auto">
                 <div className="mb-8">
@@ -108,7 +103,7 @@ function AppContent() {
                     Start New Conference
                   </h1>
                   <p className="text-slate-600">
-                    Upload documents or enter a topic to begin your AI discussion
+                    Enter a topic to begin your AI expert discussion
                   </p>
                 </div>
                 
@@ -126,7 +121,7 @@ function AppContent() {
                   </div>
                 )}
                 
-                <FileUpload 
+                <TextPrompt 
                   onSessionStart={handleSessionStart} 
                   isApiKeyConfigured={!!geminiApiKey}
                   geminiApiKey={geminiApiKey}
@@ -163,14 +158,14 @@ function AppContent() {
           <div className="max-w-4xl mx-auto text-center">
             <div className="mb-12">
               <h1 className="text-5xl md:text-6xl font-bold text-slate-800 mb-6">
-                Transform Documents into
+                Transform Ideas into
                 <span className="block bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                   AI Conversations
                 </span>
               </h1>
               <p className="text-xl text-slate-600 mb-8 max-w-2xl mx-auto">
-                Upload any document and watch as AI experts analyze, discuss, and debate the content in real-time. 
-                Join the conversation with your voice or text.
+                Enter any topic and watch as AI experts analyze, discuss, and debate the content in real-time. 
+                Join the conversation with your questions.
               </p>
             </div>
 
@@ -181,7 +176,7 @@ function AppContent() {
                 </div>
                 <h3 className="font-semibold text-slate-800 mb-2">AI Expert Panels</h3>
                 <p className="text-slate-600 text-sm">
-                  Four specialized AI agents analyze your content from different perspectives
+                  Four specialized AI agents analyze your topic from different perspectives
                 </p>
               </div>
 
@@ -189,9 +184,9 @@ function AppContent() {
                 <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
                   <Settings className="w-6 h-6 text-green-600" />
                 </div>
-                <h3 className="font-semibold text-slate-800 mb-2">Voice Integration</h3>
+                <h3 className="font-semibold text-slate-800 mb-2">Voice Synthesis</h3>
                 <p className="text-slate-600 text-sm">
-                  Speak naturally to join the discussion or ask questions
+                  Each AI expert has a unique voice and speaking style
                 </p>
               </div>
 
