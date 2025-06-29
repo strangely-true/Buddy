@@ -38,7 +38,7 @@ const Header: React.FC<HeaderProps> = ({ onShowApiKeys }) => {
               )}
               
               {user ? (
-                <UserMenu onShowSettings={onShowApiKeys} />
+                <UserMenu />
               ) : (
                 <button
                   onClick={() => setShowAuthModal(true)}

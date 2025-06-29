@@ -5,13 +5,13 @@ import { SessionProvider } from './contexts/SessionContext'
 import Header from './components/Header'
 import Dashboard from './components/dashboard/Dashboard'
 import ConferenceRoom from './components/ConferenceRoom'
-import TextPrompt from './components/TextPrompt'
+import FileUpload from './components/FileUpload'
 import ChatInterface from './components/ChatInterface'
 import ApiKeyModal from './components/ApiKeyModal'
 
 function AppContent() {
   const { user, loading } = useAuth()
-  const [currentView, setCurrentView] = useState<'dashboard' | 'prompt' | 'conference'>('dashboard')
+  const [currentView, setCurrentView] = useState<'dashboard' | 'upload' | 'conference'>('dashboard')
   const [hasSession, setHasSession] = useState(false)
   const [showApiKeyModal, setShowApiKeyModal] = useState(false)
   const [geminiApiKey, setGeminiApiKey] = useState('')
@@ -28,31 +28,24 @@ function AppContent() {
   }, [])
 
   const handleSessionStart = (newSessionId: string) => {
-    console.log('Starting new session:', newSessionId)
     setSessionId(newSessionId)
     setHasSession(true)
     setCurrentView('conference')
   }
 
   const handleEndCall = () => {
-    console.log('Ending call, clearing session state')
     setHasSession(false)
     setSessionId('')
     setCurrentView('dashboard')
   }
 
   const handleStartNewConference = () => {
-    console.log('Starting new conference')
-    setHasSession(false)
-    setSessionId('')
-    setCurrentView('prompt')
+    setCurrentView('upload')
   }
 
   const handleResumeConference = (sessionId: string) => {
-    console.log('Resuming conference:', sessionId)
-    setSessionId(sessionId)
-    setHasSession(true)
-    setCurrentView('conference')
+    // TODO: Implement resume functionality
+    console.log('Resume conference:', sessionId)
   }
 
   const handleApiKeySave = (geminiKey: string, elevenLabsKey?: string) => {
@@ -93,7 +86,7 @@ function AppContent() {
             />
           )}
 
-          {currentView === 'prompt' && (
+          {currentView === 'upload' && (
             <div className="container mx-auto px-4 py-8">
               <div className="max-w-4xl mx-auto">
                 <div className="mb-8">
@@ -107,7 +100,7 @@ function AppContent() {
                     Start New Conference
                   </h1>
                   <p className="text-slate-600">
-                    Enter a topic to begin your AI expert discussion
+                    Upload documents or enter a topic to begin your AI discussion
                   </p>
                 </div>
                 
@@ -125,7 +118,7 @@ function AppContent() {
                   </div>
                 )}
                 
-                <TextPrompt 
+                <FileUpload 
                   onSessionStart={handleSessionStart} 
                   isApiKeyConfigured={!!geminiApiKey}
                   geminiApiKey={geminiApiKey}
@@ -135,7 +128,7 @@ function AppContent() {
             </div>
           )}
 
-          {currentView === 'conference' && hasSession && sessionId && (
+          {currentView === 'conference' && hasSession && (
             <div className="container mx-auto px-4 py-4">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
                 <div className="lg:col-span-2">
@@ -162,14 +155,14 @@ function AppContent() {
           <div className="max-w-4xl mx-auto text-center">
             <div className="mb-12">
               <h1 className="text-5xl md:text-6xl font-bold text-slate-800 mb-6">
-                Transform Ideas into
+                Transform Documents into
                 <span className="block bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                   AI Conversations
                 </span>
               </h1>
               <p className="text-xl text-slate-600 mb-8 max-w-2xl mx-auto">
-                Enter any topic and watch as AI experts analyze, discuss, and debate the content in real-time. 
-                Join the conversation with your questions.
+                Upload any document and watch as AI experts analyze, discuss, and debate the content in real-time. 
+                Join the conversation with your voice or text.
               </p>
             </div>
 
@@ -180,7 +173,7 @@ function AppContent() {
                 </div>
                 <h3 className="font-semibold text-slate-800 mb-2">AI Expert Panels</h3>
                 <p className="text-slate-600 text-sm">
-                  Four specialized AI agents analyze your topic from different perspectives
+                  Four specialized AI agents analyze your content from different perspectives
                 </p>
               </div>
 
@@ -188,9 +181,9 @@ function AppContent() {
                 <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
                   <Settings className="w-6 h-6 text-green-600" />
                 </div>
-                <h3 className="font-semibold text-slate-800 mb-2">Voice Synthesis</h3>
+                <h3 className="font-semibold text-slate-800 mb-2">Voice Integration</h3>
                 <p className="text-slate-600 text-sm">
-                  Each AI expert has a unique voice and speaking style
+                  Speak naturally to join the discussion or ask questions
                 </p>
               </div>
 

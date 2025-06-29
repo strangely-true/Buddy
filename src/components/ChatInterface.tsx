@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare, Trash2, Copy, RefreshCw, AlertCircle } from 'lucide-react';
+import { Send, MessageSquare } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -34,27 +34,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
-
-  // Enhanced logging function
-  const log = (level: string, message: string, data?: any) => {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] [CHAT-${level.toUpperCase()}] ${message}`;
-    
-    if (data) {
-      console.log(logMessage, data);
-    } else {
-      console.log(logMessage);
-    }
-  };
 
   const scrollToBottom = () => {
-    if (autoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
@@ -72,41 +57,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   useEffect(() => {
-    log('info', 'Initializing chat interface', { sessionId });
-
     // Initialize socket connection
-    const newSocket = io('http://localhost:3001', {
-      timeout: 10000,
-      forceNew: true
-    });
+    const newSocket = io('http://localhost:3001');
     setSocket(newSocket);
-    socketRef.current = newSocket;
-
-    newSocket.on('connect', () => {
-      log('info', 'Chat socket connected');
-      setIsConnected(true);
-      setError(null);
-    });
-
-    newSocket.on('disconnect', () => {
-      log('warn', 'Chat socket disconnected');
-      setIsConnected(false);
-    });
-
-    newSocket.on('connect_error', (error) => {
-      log('error', 'Chat socket connection error', error);
-      setIsConnected(false);
-      setError('Failed to connect to chat server');
-    });
 
     // Join session
     newSocket.emit('join-session', sessionId);
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
-      log('info', 'Received agent message in chat', { agentName: data.agentName });
       const aiMessage: Message = {
-        id: `${Date.now()}_${Math.random()}`,
+        id: Date.now().toString(),
         content: data.message,
         sender: data.agentName,
         timestamp: new Date(data.timestamp),
@@ -117,9 +78,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
-      log('info', 'Conversation ended in chat', data);
       const systemMessage: Message = {
-        id: `${Date.now()}_${Math.random()}`,
+        id: Date.now().toString(),
         content: data.message,
         sender: 'System',
         timestamp: new Date(),
@@ -128,63 +88,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setMessages(prev => [...prev, systemMessage]);
     });
 
-    // Listen for errors
-    newSocket.on('error', (error) => {
-      log('error', 'Chat socket error', error);
-      setError(typeof error === 'string' ? error : 'Chat error occurred');
-    });
-
     return () => {
-      log('info', 'Cleaning up chat socket');
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      newSocket.disconnect();
     };
   }, [sessionId]);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isProcessing || !socket || !isConnected) {
-      log('warn', 'Cannot send message', { 
-        hasInput: !!inputValue.trim(), 
-        isProcessing, 
-        hasSocket: !!socket, 
-        isConnected 
-      });
-      return;
-    }
+    if (!inputValue.trim() || isProcessing || !socket) return;
 
     const userMessage: Message = {
-      id: `${Date.now()}_${Math.random()}`,
+      id: Date.now().toString(),
       content: inputValue,
       sender: 'You',
       timestamp: new Date(),
       type: 'user'
     };
 
-    log('info', 'Sending user message', { messageLength: inputValue.length });
-
     setMessages(prev => [...prev, userMessage]);
     const currentInput = inputValue;
     setInputValue('');
     setIsProcessing(true);
 
-    try {
-      // Send message to server
-      socket.emit('user-message', {
-        sessionId,
-        message: currentInput,
-        geminiApiKey,
-        elevenLabsApiKey
-      });
+    // Send message to server
+    socket.emit('user-message', {
+      sessionId,
+      message: currentInput,
+      geminiApiKey,
+      elevenLabsApiKey
+    });
 
-      log('info', 'User message sent to server');
-    } catch (error) {
-      log('error', 'Error sending message', error);
-      setError('Failed to send message');
-    } finally {
-      setIsProcessing(false);
-    }
+    setIsProcessing(false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -199,85 +132,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   };
 
-  const clearMessages = () => {
-    log('info', 'Clearing chat messages');
-    setMessages([{
-      id: '1',
-      content: 'Chat cleared. You can continue asking questions about the ongoing discussion.',
-      sender: 'System',
-      timestamp: new Date(),
-      type: 'system'
-    }]);
-  };
-
-  const copyMessage = (content: string) => {
-    navigator.clipboard.writeText(content);
-    log('info', 'Message copied to clipboard');
-  };
-
-  const getMessageIcon = (type: string) => {
-    switch (type) {
-      case 'ai':
-        return '🤖';
-      case 'user':
-        return '👤';
-      case 'system':
-        return '⚙️';
-      default:
-        return '💬';
-    }
-  };
-
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
-      {/* Enhanced Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b border-slate-200">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <MessageSquare className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-semibold">Discussion Chat</h3>
-              <div className="flex items-center space-x-2 text-sm text-blue-100">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-                {error && (
-                  <>
-                    <span>•</span>
-                    <span className="text-red-200">{error}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          
           <div className="flex items-center space-x-2">
-            {!autoScroll && (
-              <button
-                onClick={enableAutoScroll}
-                className="text-xs px-2 py-1 bg-white/20 text-white rounded-full hover:bg-white/30 transition-colors"
-              >
-                ↓ New messages
-              </button>
-            )}
-            <button
-              onClick={clearMessages}
-              className="p-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
-              title="Clear Chat"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <MessageSquare className="w-5 h-5 text-slate-600" />
+            <h3 className="font-medium text-slate-800">Discussion Chat</h3>
           </div>
+          {!autoScroll && (
+            <button
+              onClick={enableAutoScroll}
+              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+            >
+              ↓ New messages
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Enhanced Messages */}
+      {/* Messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50"
+        className="flex-1 overflow-y-auto p-4 space-y-4"
         onScroll={handleScroll}
-        style={{ minHeight: 0 }}
       >
         {messages.map((message) => (
           <div
@@ -285,72 +164,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl p-4 shadow-sm relative group ${
+              className={`max-w-[80%] rounded-lg p-3 ${
                 message.type === 'user'
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                  ? 'bg-blue-600 text-white'
                   : message.type === 'system'
-                  ? 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 border border-amber-200'
-                  : 'bg-white text-slate-800 border border-slate-200'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : 'bg-slate-100 text-slate-800'
               }`}
             >
-              {/* Message Header */}
               {(message.type === 'ai' || message.type === 'system') && (
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm">{getMessageIcon(message.type)}</span>
-                    <span className="text-xs font-semibold opacity-75">
-                      {message.sender}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => copyMessage(message.content)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-black/10 rounded"
-                    title="Copy message"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
+                <div className="text-xs font-medium mb-1 opacity-75">
+                  {message.sender}
                 </div>
               )}
-
-              {/* Message Content */}
-              <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                {message.content}
-              </div>
-
-              {/* Message Footer */}
-              <div className={`text-xs mt-2 opacity-75 flex items-center justify-between ${
+              <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+              <div className={`text-xs mt-1 opacity-75 ${
                 message.type === 'user' 
                   ? 'text-blue-100' 
                   : message.type === 'system'
                   ? 'text-amber-600'
                   : 'text-slate-500'
               }`}>
-                <span>
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                {message.type === 'user' && (
-                  <button
-                    onClick={() => copyMessage(message.content)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/20 rounded"
-                    title="Copy message"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
-                )}
+                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           </div>
         ))}
-        
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-white text-slate-800 rounded-2xl p-4 max-w-[85%] border border-slate-200 shadow-sm">
-              <div className="flex items-center space-x-3">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                </div>
+            <div className="bg-slate-100 text-slate-800 rounded-lg p-3 max-w-[80%]">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
                 <span className="text-sm text-slate-600">Expert is responding...</span>
               </div>
             </div>
@@ -359,47 +205,33 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Enhanced Input */}
-      <div className="bg-white border-t border-slate-200 p-4">
-        {error && (
-          <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2 text-sm text-red-700">
-            <AlertCircle className="w-4 h-4" />
-            <span>{error}</span>
-          </div>
-        )}
-        
-        <div className="flex items-end space-x-3">
+      {/* Input */}
+      <div className="p-4 border-t border-slate-200">
+        <div className="flex items-end space-x-2">
           <div className="flex-1">
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder={isConnected 
-                ? "Ask questions about the topic or request clarification..."
-                : "Connecting to chat server..."
-              }
-              className="w-full p-3 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all disabled:opacity-50"
+              placeholder="Ask questions about the topic or request clarification..."
+              className="w-full p-3 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows={2}
-              disabled={isProcessing || !isConnected}
+              disabled={isProcessing}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isProcessing || !isConnected}
-            className="p-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg flex-shrink-0"
+            disabled={!inputValue.trim() || isProcessing}
+            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Send Message"
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4" />
           </button>
         </div>
         
-        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-          <span>💡 Ask specific questions to guide the expert discussion</span>
-          <div className="flex items-center space-x-2">
-            <RefreshCw className={`w-3 h-3 ${isConnected ? 'text-green-500' : 'text-red-500'}`} />
-            <span>{isConnected ? 'Live' : 'Reconnecting...'}</span>
-          </div>
+        <div className="mt-2 text-xs text-slate-500">
+          💡 Ask specific questions to guide the expert discussion or request deeper analysis on particular points
         </div>
       </div>
     </div>
