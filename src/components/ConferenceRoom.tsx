@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, MessageCircle, Mic, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, MessageCircle, Mic, Sparkles, AlertTriangle } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
+import { getSocketUrl } from '../config/api';
 
 interface ConferenceRoomProps {
   onEndCall: () => void;
@@ -29,6 +30,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [maxMessages] = useState(15);
   const [discussionTime, setDiscussionTime] = useState(0);
   const [isEnding, setIsEnding] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
@@ -96,87 +98,105 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     if (isEnding) return;
 
     // Initialize socket connection
-    const newSocket = io('http://localhost:3001');
-    setSocket(newSocket);
+    try {
+      const newSocket = io(getSocketUrl());
+      setSocket(newSocket);
 
-    // Join session
-    newSocket.emit('join-session', sessionId);
+      newSocket.on('connect', () => {
+        console.log('Connected to backend');
+        setConnectionError(false);
+        // Join session
+        newSocket.emit('join-session', sessionId);
+      });
 
-    // Listen for agent messages
-    newSocket.on('agent-message', (data) => {
-      if (isEnding) return;
-      
-      setActiveParticipant(data.agentId);
-      setCurrentTopic('AI Expert Discussion in Progress');
-      setConversationStatus('active');
-      setMessageCount(prev => prev + 1);
-      
-      if (data.audio && isSpeakerOn && !isPaused && !isEnding) {
-        playAudio(data.audio, data.audioDuration || 5000);
-      } else if (data.audioDuration) {
-        setTimeout(() => {
-          if (!isEnding) {
-            setActiveParticipant(null);
+      newSocket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+        setConnectionError(true);
+        setCurrentTopic('Backend server not connected - limited functionality');
+      });
+
+      // Listen for agent messages
+      newSocket.on('agent-message', (data) => {
+        if (isEnding) return;
+        
+        setActiveParticipant(data.agentId);
+        setCurrentTopic('AI Expert Discussion in Progress');
+        setConversationStatus('active');
+        setMessageCount(prev => prev + 1);
+        
+        if (data.audio && isSpeakerOn && !isPaused && !isEnding) {
+          playAudio(data.audio, data.audioDuration || 5000);
+        } else if (data.audioDuration) {
+          setTimeout(() => {
+            if (!isEnding) {
+              setActiveParticipant(null);
+            }
+          }, data.audioDuration);
+        } else {
+          setTimeout(() => {
+            if (!isEnding) {
+              setActiveParticipant(null);
+            }
+          }, 5000);
+        }
+      });
+
+      // Listen for conversation pause/resume
+      newSocket.on('conversation-paused', () => {
+        if (!isEnding) {
+          setIsPaused(true);
+          if (currentAudio) {
+            currentAudio.pause();
           }
-        }, data.audioDuration);
-      } else {
-        setTimeout(() => {
-          if (!isEnding) {
-            setActiveParticipant(null);
-          }
-        }, 5000);
+        }
+      });
+
+      newSocket.on('conversation-resumed', () => {
+        if (!isEnding) {
+          setIsPaused(false);
+        }
+      });
+
+      // Listen for conversation end
+      newSocket.on('conversation-ended', (data) => {
+        if (isEnding) return;
+        
+        console.log('Conversation ended naturally');
+        handleConversationEnd();
+      });
+
+      // Listen for session end
+      newSocket.on('session-ended', () => {
+        if (!isEnding) {
+          console.log('Session ended');
+          handleConversationEnd();
+        }
+      });
+
+      // Start conversation only if connected
+      if (!connectionError) {
+        newSocket.emit('start-conversation', {
+          sessionId,
+          geminiApiKey,
+          elevenLabsApiKey
+        });
       }
-    });
 
-    // Listen for conversation pause/resume
-    newSocket.on('conversation-paused', () => {
-      if (!isEnding) {
-        setIsPaused(true);
+      return () => {
         if (currentAudio) {
           currentAudio.pause();
+          currentAudio.src = '';
         }
-      }
-    });
-
-    newSocket.on('conversation-resumed', () => {
-      if (!isEnding) {
-        setIsPaused(false);
-      }
-    });
-
-    // Listen for conversation end
-    newSocket.on('conversation-ended', (data) => {
-      if (isEnding) return;
-      
-      console.log('Conversation ended naturally');
-      handleConversationEnd();
-    });
-
-    // Listen for session end
-    newSocket.on('session-ended', () => {
-      if (!isEnding) {
-        console.log('Session ended');
-        handleConversationEnd();
-      }
-    });
-
-    // Start conversation
-    newSocket.emit('start-conversation', {
-      sessionId,
-      geminiApiKey,
-      elevenLabsApiKey
-    });
-
-    return () => {
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.src = '';
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      newSocket.disconnect();
-    };
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+        newSocket.disconnect();
+      };
+    } catch (error) {
+      console.error('Failed to initialize socket connection:', error);
+      setConnectionError(true);
+      setCurrentTopic('Backend server not available');
+    }
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
   const handleConversationEnd = () => {
@@ -256,7 +276,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const toggleConversation = () => {
-    if (!socket || isEnding) return;
+    if (!socket || isEnding || connectionError) return;
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -275,7 +295,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     
     console.log('Manual end call triggered');
     
-    if (socket) {
+    if (socket && !connectionError) {
       socket.emit('end-session', sessionId);
     }
     
@@ -333,11 +353,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               <h2 className="text-2xl font-bold">AI Expert Panel</h2>
               <div className="flex items-center space-x-4 mt-1">
                 <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                  isCallActive ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                  isCallActive && !connectionError ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'
                 }`}>
-                  {isCallActive ? '🔴 Live' : 'Ended'}
+                  {isCallActive && !connectionError ? '🔴 Live' : connectionError ? '⚠️ Offline' : 'Ended'}
                 </span>
-                {conversationStatus === 'active' && (
+                {conversationStatus === 'active' && !connectionError && (
                   <span className={`px-3 py-1 text-xs rounded-full font-medium ${
                     isPaused ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                   }`}>
@@ -370,11 +390,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           </div>
         </div>
 
+        {/* Connection Error Warning */}
+        {connectionError && (
+          <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
+            <div className="text-sm text-red-300">
+              <strong>Backend Disconnected:</strong> Deploy the backend server to enable full AI discussion features.
+            </div>
+          </div>
+        )}
+
         {/* Control Buttons */}
         <div className="flex items-center justify-center space-x-4 mt-6">
           <button
             onClick={toggleConversation}
-            disabled={!isCallActive || conversationStatus === 'ended' || isEnding}
+            disabled={!isCallActive || conversationStatus === 'ended' || isEnding || connectionError}
             className={`p-4 rounded-2xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
               isPaused 
                 ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg' 
@@ -416,13 +446,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <div
               key={participant.id}
               className={`relative bg-gray-700/30 backdrop-blur-sm rounded-3xl p-6 border transition-all duration-300 ${
-                activeParticipant === participant.id 
+                activeParticipant === participant.id && !connectionError
                   ? 'border-purple-500/50 shadow-lg shadow-purple-500/20 scale-105 bg-gradient-to-br from-purple-500/10 to-pink-500/10' 
                   : 'border-gray-600/30 hover:border-gray-500/50 hover:shadow-lg'
               }`}
             >
               {/* Speaking Animation */}
-              {activeParticipant === participant.id && !isPaused && !isEnding && (
+              {activeParticipant === participant.id && !isPaused && !isEnding && !connectionError && (
                 <div className="absolute -top-2 -right-2">
                   <div className="w-8 h-8 bg-gradient-to-r from-green-400 to-emerald-400 rounded-full flex items-center justify-center animate-pulse shadow-lg">
                     <Mic className="w-4 h-4 text-white" />
@@ -433,7 +463,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               {/* Avatar */}
               <div className="text-center mb-6">
                 <div className={`w-24 h-24 rounded-3xl flex items-center justify-center text-4xl mb-4 mx-auto transition-all duration-300 shadow-lg ${
-                  activeParticipant === participant.id 
+                  activeParticipant === participant.id && !connectionError
                     ? `bg-gradient-to-br ${participant.color} scale-110 shadow-xl` 
                     : 'bg-gray-600/50'
                 }`}>
@@ -451,7 +481,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               {/* Status Indicator */}
               <div className="text-center">
-                {activeParticipant === participant.id && !isPaused && !isEnding ? (
+                {activeParticipant === participant.id && !isPaused && !isEnding && !connectionError ? (
                   <div className="space-y-3">
                     <div className="text-sm text-green-300 font-medium flex items-center justify-center space-x-2">
                       <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
@@ -467,7 +497,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
                 ) : (
                   <div className="text-sm text-gray-400 flex items-center justify-center space-x-2">
                     <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
-                    <span>Listening</span>
+                    <span>{connectionError ? 'Offline' : 'Listening'}</span>
                   </div>
                 )}
               </div>
@@ -487,28 +517,35 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             {currentTopic}
           </p>
           
-          {conversationStatus === 'preparing' && (
+          {conversationStatus === 'preparing' && !connectionError && (
             <div className="inline-flex items-center space-x-2 text-sm text-blue-300 bg-blue-500/20 px-4 py-2 rounded-full border border-blue-500/30">
               <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
               <span>Analyzing content and preparing discussion...</span>
             </div>
           )}
           
-          {conversationStatus === 'active' && activeParticipant && !isPaused && !isEnding && (
+          {conversationStatus === 'active' && activeParticipant && !isPaused && !isEnding && !connectionError && (
             <div className="inline-flex items-center space-x-2 text-sm text-green-300 bg-green-500/20 px-4 py-2 rounded-full border border-green-500/30">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               <span>{participants.find(p => p.id === activeParticipant)?.name} is analyzing...</span>
             </div>
           )}
           
-          {isPaused && !isEnding && (
+          {isPaused && !isEnding && !connectionError && (
             <div className="inline-flex items-center space-x-2 text-sm text-yellow-300 bg-yellow-500/20 px-4 py-2 rounded-full border border-yellow-500/30">
               <Pause className="w-3 h-3" />
               <span>Discussion paused - Click play to resume</span>
             </div>
           )}
 
-          {messageCount >= maxMessages && !isEnding && (
+          {connectionError && (
+            <div className="inline-flex items-center space-x-2 text-sm text-red-300 bg-red-500/20 px-4 py-2 rounded-full border border-red-500/30">
+              <AlertTriangle className="w-3 h-3" />
+              <span>Backend server required for AI discussion features</span>
+            </div>
+          )}
+
+          {messageCount >= maxMessages && !isEnding && !connectionError && (
             <div className="inline-flex items-center space-x-2 text-sm text-red-300 bg-red-500/20 px-4 py-2 rounded-full mt-2 border border-red-500/30">
               <MessageCircle className="w-3 h-3" />
               <span>Discussion limit reached - Wrapping up</span>

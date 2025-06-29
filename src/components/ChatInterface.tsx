@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, MessageSquare, Sparkles, ArrowDown, Bot, User } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
+import { getSocketUrl } from '../config/api';
 
 interface Message {
   id: string;
@@ -36,6 +37,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -77,44 +79,78 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     // Initialize socket connection
-    const newSocket = io('http://localhost:3001');
-    setSocket(newSocket);
+    try {
+      const newSocket = io(getSocketUrl());
+      setSocket(newSocket);
 
-    // Join session
-    newSocket.emit('join-session', sessionId);
+      newSocket.on('connect', () => {
+        console.log('Connected to backend');
+        setConnectionError(false);
+        // Join session
+        newSocket.emit('join-session', sessionId);
+      });
 
-    // Listen for agent messages
-    newSocket.on('agent-message', (data) => {
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        content: data.message,
-        sender: data.agentName,
-        timestamp: new Date(data.timestamp),
-        type: 'ai',
-        agentId: data.agentId
+      newSocket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+        setConnectionError(true);
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          content: 'Unable to connect to the backend server. The discussion features may not work properly.',
+          sender: 'System',
+          timestamp: new Date(),
+          type: 'system'
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      });
+
+      // Listen for agent messages
+      newSocket.on('agent-message', (data) => {
+        const aiMessage: Message = {
+          id: Date.now().toString(),
+          content: data.message,
+          sender: data.agentName,
+          timestamp: new Date(data.timestamp),
+          type: 'ai',
+          agentId: data.agentId
+        };
+        setMessages(prev => [...prev, aiMessage]);
+      });
+
+      // Listen for conversation end
+      newSocket.on('conversation-ended', (data) => {
+        const systemMessage: Message = {
+          id: Date.now().toString(),
+          content: data.message,
+          sender: 'System',
+          timestamp: new Date(),
+          type: 'system'
+        };
+        setMessages(prev => [...prev, systemMessage]);
+      });
+
+      return () => {
+        newSocket.disconnect();
       };
-      setMessages(prev => [...prev, aiMessage]);
-    });
+    } catch (error) {
+      console.error('Failed to initialize socket connection:', error);
+      setConnectionError(true);
+    }
+  }, [sessionId]);
 
-    // Listen for conversation end
-    newSocket.on('conversation-ended', (data) => {
-      const systemMessage: Message = {
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isProcessing) return;
+
+    if (!socket || connectionError) {
+      const errorMessage: Message = {
         id: Date.now().toString(),
-        content: data.message,
+        content: 'Cannot send message: Not connected to backend server.',
         sender: 'System',
         timestamp: new Date(),
         type: 'system'
       };
-      setMessages(prev => [...prev, systemMessage]);
-    });
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, [sessionId]);
-
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isProcessing || !socket) return;
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -177,6 +213,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <p className="text-sm text-gray-300 flex items-center space-x-1">
                 <Sparkles className="w-3 h-3" />
                 <span>Join the expert conversation</span>
+                {connectionError && (
+                  <span className="text-red-400 text-xs ml-2">(Backend disconnected)</span>
+                )}
               </p>
             </div>
           </div>
@@ -287,17 +326,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask questions about the topic or request clarification..."
-              className="w-full p-4 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200 text-white placeholder-gray-400"
+              placeholder={connectionError 
+                ? "Backend server not connected - messages cannot be sent"
+                : "Ask questions about the topic or request clarification..."
+              }
+              className="w-full p-4 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all duration-200 text-white placeholder-gray-400 disabled:opacity-50"
               rows={2}
-              disabled={isProcessing}
+              disabled={isProcessing || connectionError}
               style={{ minHeight: '60px', maxHeight: '120px' }}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isProcessing}
+            disabled={!inputValue.trim() || isProcessing || connectionError}
             className="p-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-2xl hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
             title="Send Message"
           >
@@ -307,7 +349,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         
         <div className="mt-4 text-xs text-gray-400 flex items-center space-x-2">
           <Sparkles className="w-3 h-3" />
-          <span>Ask specific questions to guide the expert discussion or request deeper analysis</span>
+          <span>
+            {connectionError 
+              ? "Backend server connection required for AI responses"
+              : "Ask specific questions to guide the expert discussion or request deeper analysis"
+            }
+          </span>
         </div>
       </div>
     </div>

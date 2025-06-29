@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Type, Loader2, AlertCircle, Settings, Sparkles, Zap } from 'lucide-react';
 import axios from 'axios';
 import FileUploader from './FileUploader';
+import { getApiUrl } from '../config/api';
 
 interface FileUploadProps {
   onSessionStart: (sessionId: string) => void;
@@ -124,7 +125,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         imageCount: images.length 
       });
 
-      const response = await axios.post('http://localhost:3001/api/process-content', {
+      const response = await axios.post(getApiUrl('/api/process-content'), {
         content: requestContent,
         type: images.length > 0 ? 'multimodal' : 'text',
         sessionId,
@@ -141,10 +142,14 @@ const FileUpload: React.FC<FileUploadProps> = ({
     } catch (error) {
       console.error('Content processing error:', error);
       if (axios.isAxiosError(error)) {
-        const errorMessage = error.response?.data?.error || error.message;
-        setError(`Failed to process content: ${errorMessage}`);
+        if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+          setError('Cannot connect to backend server. The backend may not be deployed yet.');
+        } else {
+          const errorMessage = error.response?.data?.error || error.message;
+          setError(`Failed to process content: ${errorMessage}`);
+        }
       } else {
-        setError('Failed to process content. Please check your API key and try again.');
+        setError('Failed to process content. Please check your connection and try again.');
       }
       setUploading(false);
     }
@@ -164,6 +169,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
             <div>
               <h4 className="text-red-300 font-semibold text-lg mb-1">Error</h4>
               <p className="text-red-200/80">{error}</p>
+              {error.includes('backend server') && (
+                <div className="mt-3 p-3 bg-blue-500/20 border border-blue-500/30 rounded-xl">
+                  <p className="text-blue-300 text-sm">
+                    <strong>Note:</strong> You'll need to deploy the backend server separately to a service like Heroku, Railway, or Render, then update the API_CONFIG.BASE_URL in src/config/api.ts
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
