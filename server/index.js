@@ -301,7 +301,8 @@ Keep the analysis concise but comprehensive for a focused 5-15 minute expert dis
       nextTimeout: null,
       topicBoundaries: analysis,
       lastSpeakers: [],
-      startTime: new Date()
+      startTime: new Date(),
+      isEnding: false // Track if session is ending
     });
 
     res.json({ success: true, analysis });
@@ -324,8 +325,8 @@ io.on('connection', (socket) => {
     const { sessionId, geminiApiKey, elevenLabsApiKey } = data;
     const session = sessions.get(sessionId);
     
-    if (!session) {
-      socket.emit('error', 'Session not found');
+    if (!session || session.isEnding) {
+      socket.emit('error', 'Session not found or ending');
       return;
     }
 
@@ -387,8 +388,8 @@ Stay strictly within the topic boundaries defined in the analysis.`;
     const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
     const session = sessions.get(sessionId);
     
-    if (!session) {
-      socket.emit('error', 'Session not found');
+    if (!session || session.isEnding) {
+      socket.emit('error', 'Session not found or ending');
       return;
     }
 
@@ -425,7 +426,7 @@ Stay strictly within the topic boundaries defined in the analysis.`;
 
   socket.on('pause-conversation', (sessionId) => {
     const session = sessions.get(sessionId);
-    if (session) {
+    if (session && !session.isEnding) {
       session.isPaused = true;
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
@@ -437,7 +438,7 @@ Stay strictly within the topic boundaries defined in the analysis.`;
 
   socket.on('resume-conversation', (sessionId) => {
     const session = sessions.get(sessionId);
-    if (session) {
+    if (session && !session.isEnding) {
       session.isPaused = false;
       io.to(sessionId).emit('conversation-resumed');
       
@@ -452,12 +453,19 @@ Stay strictly within the topic boundaries defined in the analysis.`;
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
+      session.isEnding = true;
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
       }
-      sessions.delete(sessionId);
+      
+      // Emit session ended immediately for manual end
+      io.to(sessionId).emit('session-ended');
+      
+      // Clean up session after a delay
+      setTimeout(() => {
+        sessions.delete(sessionId);
+      }, 5000);
     }
-    io.to(sessionId).emit('session-ended');
   });
 
   socket.on('disconnect', () => {
@@ -468,8 +476,9 @@ Stay strictly within the topic boundaries defined in the analysis.`;
 // Synchronized conversation function with random agent selection
 async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
-  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
-    if (session && session.totalMessages >= session.maxMessages) {
+  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages || session.isEnding) {
+    if (session && session.totalMessages >= session.maxMessages && !session.isEnding) {
+      session.isEnding = true;
       io.to(sessionId).emit('conversation-ended', {
         message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
       });
@@ -487,7 +496,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
 // Generate next agent response with enhanced random selection
 async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
   const session = sessions.get(sessionId);
-  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
+  if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages || session.isEnding) {
     return;
   }
 
@@ -532,12 +541,13 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       timestamp: new Date()
     });
 
-    if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused) {
+    if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused && !session.isEnding) {
       const nextDelay = 2000 + Math.random() * 3000;
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + nextDelay);
-    } else if (session.totalMessages >= session.maxMessages) {
+    } else if (session.totalMessages >= session.maxMessages && !session.isEnding) {
+      session.isEnding = true;
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'

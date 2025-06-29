@@ -30,6 +30,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [maxMessages] = useState(15); // Limited focused discussion
   const [discussionTime, setDiscussionTime] = useState(0);
   const [isEnding, setIsEnding] = useState(false);
+  const [isManualEnd, setIsManualEnd] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
@@ -103,6 +104,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
+      if (isEnding) return; // Don't process new messages if ending
+      
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Expert Discussion in Progress');
       setConversationStatus('active');
@@ -138,6 +141,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
+      if (isEnding) return; // Prevent double processing
+      
       setIsEnding(true);
       setConversationStatus('ended');
       setCurrentTopic(data.message);
@@ -145,14 +150,16 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       
       // Generate conversation summary and end call
       setTimeout(() => {
-        handleConversationEnd();
+        handleConversationEnd(false); // false = not manual end
       }, 2000);
     });
 
     // Listen for session end
     newSocket.on('session-ended', () => {
-      setIsCallActive(false);
-      handleConversationEnd();
+      if (!isEnding) {
+        setIsCallActive(false);
+        handleConversationEnd(isManualEnd);
+      }
     });
 
     // Start conversation
@@ -174,25 +181,44 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
-  const handleConversationEnd = async () => {
+  const handleConversationEnd = async (manualEnd: boolean = false) => {
+    if (isEnding) return; // Prevent multiple calls
+    
     setIsEnding(true);
+    setIsCallActive(false);
+    
+    // Stop any playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+    }
+    
+    // Clear timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
     
     // Create conversation summary
     const summary = {
       sessionId,
       totalMessages: messageCount,
       duration: discussionTime,
-      topic: currentTopic,
+      topic: currentTopic === 'Preparing AI conference...' ? 'AI Expert Discussion' : currentTopic,
       participants: participants.map(p => p.name),
       endedAt: new Date().toISOString(),
-      status: 'completed'
+      status: 'completed',
+      endType: manualEnd ? 'manual' : 'automatic'
     };
 
-    // Pass summary to parent component
-    onConversationEnd(summary);
+    // Small delay to show ending state, then pass summary to parent
+    setTimeout(() => {
+      onConversationEnd(summary);
+    }, 1500);
   };
 
   const playAudio = (audioBase64: string, duration: number) => {
+    if (isEnding) return; // Don't play audio if ending
+    
     try {
       // Stop any currently playing audio
       if (currentAudio) {
@@ -248,22 +274,15 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const handleEndCall = () => {
     if (isEnding) return;
     
-    setIsEnding(true);
-    setIsCallActive(false);
+    setIsManualEnd(true);
     
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio.src = '';
-    }
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
+    // Emit end session to server
     if (socket) {
       socket.emit('end-session', sessionId);
-      socket.disconnect();
     }
     
-    handleConversationEnd();
+    // Handle conversation end immediately for manual end
+    handleConversationEnd(true);
   };
 
   const toggleSpeaker = () => {
@@ -293,7 +312,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             <MessageCircle className="w-8 h-8 text-white" />
           </div>
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Discussion Complete</h2>
-          <p className="text-slate-600 mb-4">Generating summary and saving conversation...</p>
+          <p className="text-slate-600 mb-4">
+            {isManualEnd ? 'Ending conversation and saving...' : 'Generating summary and saving conversation...'}
+          </p>
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
         </div>
       </div>
