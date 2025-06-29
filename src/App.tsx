@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { MessageCircle, Settings, Sparkles } from 'lucide-react'
+import { MessageCircle, Settings, Sparkles, Key, AlertTriangle } from 'lucide-react'
 import Header from './components/Header'
 import ConferenceRoom from './components/ConferenceRoom'
 import FileUpload from './components/FileUpload'
@@ -22,8 +22,8 @@ function App() {
     if (savedGeminiKey) setGeminiApiKey(savedGeminiKey)
     if (savedElevenLabsKey) setElevenLabsApiKey(savedElevenLabsKey)
 
-    // Show API key modal if no Gemini key is configured
-    if (!savedGeminiKey) {
+    // Show API key modal if either key is missing
+    if (!savedGeminiKey || !savedElevenLabsKey) {
       setShowApiKeyModal(true)
     }
   }, [])
@@ -55,6 +55,8 @@ function App() {
     setShowApiKeyModal(true)
   }
 
+  const areApiKeysConfigured = geminiApiKey.trim() && elevenLabsApiKey.trim()
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
       <Header onShowApiKeys={handleShowApiKeyModal} />
@@ -75,25 +77,30 @@ function App() {
                   </span>
                 </h1>
                 <p className="text-xl lg:text-2xl text-gray-300 max-w-3xl mx-auto leading-relaxed">
-                  Transform your documents into dynamic AI discussions with expert perspectives
+                  Transform your ideas into dynamic AI discussions with expert perspectives
                 </p>
               </div>
             </div>
             
-            {!geminiApiKey && (
-              <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl p-6 lg:p-8 mb-8 backdrop-blur-sm">
+            {!areApiKeysConfigured && (
+              <div className="bg-gradient-to-r from-red-500/10 to-pink-500/10 border border-red-500/20 rounded-2xl p-6 lg:p-8 mb-8 backdrop-blur-sm">
                 <div className="flex items-start space-x-4">
-                  <div className="w-12 h-12 bg-gradient-to-r from-amber-400 to-orange-400 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Settings className="w-6 h-6 text-white" />
+                  <div className="w-12 h-12 bg-gradient-to-r from-red-400 to-pink-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <AlertTriangle className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="font-bold text-amber-300 text-lg mb-2">API Configuration Required</h3>
-                    <p className="text-amber-200/80 mb-4 leading-relaxed">
-                      Configure your Gemini API key to unlock the full AI conference experience. ElevenLabs is optional for voice synthesis.
+                    <h3 className="font-bold text-red-300 text-lg mb-2">API Keys Required</h3>
+                    <p className="text-red-200/80 mb-4 leading-relaxed">
+                      Both Gemini and ElevenLabs API keys are required to use the AI conference platform. 
+                      Please configure your API keys to continue.
                     </p>
+                    <div className="space-y-2 text-sm text-red-200/70 mb-4">
+                      <p>• <strong>Gemini API:</strong> Powers the AI expert discussions and content analysis</p>
+                      <p>• <strong>ElevenLabs API:</strong> Provides realistic voice synthesis for each AI expert</p>
+                    </div>
                     <button
                       onClick={handleShowApiKeyModal}
-                      className="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium hover:from-amber-600 hover:to-orange-600 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+                      className="px-6 py-3 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl font-medium hover:from-red-600 hover:to-pink-600 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
                     >
                       Configure API Keys
                     </button>
@@ -104,7 +111,7 @@ function App() {
             
             <FileUpload 
               onSessionStart={handleSessionStart} 
-              isApiKeyConfigured={!!geminiApiKey}
+              isApiKeyConfigured={areApiKeysConfigured}
               geminiApiKey={geminiApiKey}
               elevenLabsApiKey={elevenLabsApiKey}
             />

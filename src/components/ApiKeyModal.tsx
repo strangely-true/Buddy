@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Key, Eye, EyeOff, Sparkles, ExternalLink } from 'lucide-react';
+import { X, Key, Eye, EyeOff, Sparkles, ExternalLink, AlertTriangle } from 'lucide-react';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -24,11 +24,13 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   if (!isOpen) return null;
 
   const handleSave = () => {
-    if (geminiKey.trim()) {
-      onSave(geminiKey.trim(), elevenLabsKey.trim() || undefined);
+    if (geminiKey.trim() && elevenLabsKey.trim()) {
+      onSave(geminiKey.trim(), elevenLabsKey.trim());
       onClose();
     }
   };
+
+  const canSave = geminiKey.trim() && elevenLabsKey.trim();
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -41,7 +43,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Configure API Keys</h2>
-              <p className="text-gray-400 text-sm">Unlock the full AI experience</p>
+              <p className="text-gray-400 text-sm">Both keys are required</p>
             </div>
           </div>
           <button
@@ -54,6 +56,19 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
         {/* Content */}
         <div className="p-8 space-y-8">
+          {/* Required Notice */}
+          <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl p-4">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-amber-300 font-medium mb-1">Both API Keys Required</p>
+                <p className="text-amber-200/80 text-sm">
+                  The AI conference platform requires both Gemini (for AI discussions) and ElevenLabs (for voice synthesis) to function properly.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Gemini API Key */}
           <div>
             <label className="block text-sm font-semibold text-gray-300 mb-3">
@@ -94,7 +109,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
           {/* ElevenLabs API Key */}
           <div>
             <label className="block text-sm font-semibold text-gray-300 mb-3">
-              ElevenLabs API Key <span className="text-gray-500">(Optional)</span>
+              ElevenLabs API Key <span className="text-red-400">*</span>
             </label>
             <div className="relative">
               <input
@@ -153,7 +168,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={!geminiKey.trim()}
+            disabled={!canSave}
             className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg"
           >
             Save Keys
