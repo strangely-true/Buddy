@@ -264,21 +264,22 @@ Time limit: 5-15 minutes of focused expert discussion.`;
 
     const analysis = response.text;
 
-    // Store session data
+    // Store session data with proper initialization
     sessions.set(sessionId, {
       topic: analysis,
       conversationHistory: [],
       participants: agents,
-      isActive: true,
+      isActive: false, // Start as false, will be set to true when conversation starts
       isPaused: false,
       currentSpeaker: null,
       totalMessages: 0,
       maxMessages: 18,
       nextTimeout: null,
       topicBoundaries: analysis,
-      startTime: Date.now(),
+      startTime: null, // Will be set when conversation actually starts
       maxDuration: 15 * 60 * 1000,
-      userId: userId
+      userId: userId,
+      status: 'prepared' // New status to track session state
     });
 
     res.json({ success: true, analysis });
@@ -305,6 +306,11 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Session not found');
       return;
     }
+
+    // Initialize session for active conversation
+    session.isActive = true;
+    session.startTime = Date.now();
+    session.status = 'active';
 
     try {
       const openingAgent = agents[0]; // Dr. Chen
@@ -346,6 +352,7 @@ Your opening statement:`;
         timestamp: new Date()
       });
 
+      // Schedule next response
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + 2000);
@@ -360,12 +367,13 @@ Your opening statement:`;
     const { sessionId, message, geminiApiKey, elevenLabsApiKey } = data;
     const session = sessions.get(sessionId);
     
-    if (!session) {
-      socket.emit('error', 'Session not found');
+    if (!session || !session.isActive) {
+      socket.emit('error', 'Session not found or not active');
       return;
     }
 
     try {
+      // Clear any pending timeout
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
         session.nextTimeout = null;
@@ -373,6 +381,7 @@ Your opening statement:`;
 
       session.conversationHistory.push(`User: ${message}`);
 
+      // Schedule agent response
       session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
       }, 1500);
@@ -385,7 +394,7 @@ Your opening statement:`;
 
   socket.on('pause-conversation', (sessionId) => {
     const session = sessions.get(sessionId);
-    if (session) {
+    if (session && session.isActive) {
       session.isPaused = true;
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
@@ -397,10 +406,11 @@ Your opening statement:`;
 
   socket.on('resume-conversation', (sessionId) => {
     const session = sessions.get(sessionId);
-    if (session) {
+    if (session && session.isActive) {
       session.isPaused = false;
       io.to(sessionId).emit('conversation-resumed');
       
+      // Resume conversation flow
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
       }, 1500);
@@ -411,10 +421,13 @@ Your opening statement:`;
     const session = sessions.get(sessionId);
     if (session) {
       session.isActive = false;
+      session.status = 'ended';
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
+        session.nextTimeout = null;
       }
       
+      // Clean up session after delay
       setTimeout(() => {
         sessions.delete(sessionId);
       }, 60000);
@@ -434,9 +447,11 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
     return;
   }
 
-  // Check time limit
-  const elapsed = Date.now() - session.startTime;
+  // Check time and message limits
+  const elapsed = session.startTime ? Date.now() - session.startTime : 0;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    session.isActive = false;
+    session.status = 'ended';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -457,9 +472,11 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     return;
   }
 
-  // Check limits
-  const elapsed = Date.now() - session.startTime;
+  // Check limits again
+  const elapsed = session.startTime ? Date.now() - session.startTime : 0;
   if (elapsed >= session.maxDuration || session.totalMessages >= session.maxMessages) {
+    session.isActive = false;
+    session.status = 'ended';
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -512,7 +529,7 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       timestamp: new Date()
     });
 
-    // Schedule next response
+    // Schedule next response if within limits
     const remainingTime = session.maxDuration - (Date.now() - session.startTime);
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused && remainingTime > 30000) {
       session.nextTimeout = setTimeout(() => {
@@ -520,6 +537,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       }, audioDuration + 2000);
     } else {
       // End conversation
+      session.isActive = false;
+      session.status = 'ended';
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'

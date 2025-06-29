@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare, Trash2, Copy, RefreshCw } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -34,6 +34,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +61,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     // Initialize socket connection
     const newSocket = io('http://localhost:3001');
     setSocket(newSocket);
+
+    newSocket.on('connect', () => {
+      setIsConnected(true);
+    });
+
+    newSocket.on('disconnect', () => {
+      setIsConnected(false);
+    });
 
     // Join session
     newSocket.emit('join-session', sessionId);
@@ -132,30 +141,75 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   };
 
+  const clearMessages = () => {
+    setMessages([{
+      id: '1',
+      content: 'Chat cleared. You can continue asking questions about the ongoing discussion.',
+      sender: 'System',
+      timestamp: new Date(),
+      type: 'system'
+    }]);
+  };
+
+  const copyMessage = (content: string) => {
+    navigator.clipboard.writeText(content);
+  };
+
+  const getMessageIcon = (type: string) => {
+    switch (type) {
+      case 'ai':
+        return '🤖';
+      case 'user':
+        return '👤';
+      case 'system':
+        return '⚙️';
+      default:
+        return '💬';
+    }
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-slate-200 flex-shrink-0">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <MessageSquare className="w-5 h-5 text-slate-600" />
-            <h3 className="font-medium text-slate-800">Discussion Chat</h3>
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+              <MessageSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-semibold">Discussion Chat</h3>
+              <div className="flex items-center space-x-2 text-sm text-blue-100">
+                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+              </div>
+            </div>
           </div>
-          {!autoScroll && (
+          
+          <div className="flex items-center space-x-2">
+            {!autoScroll && (
+              <button
+                onClick={enableAutoScroll}
+                className="text-xs px-2 py-1 bg-white/20 text-white rounded-full hover:bg-white/30 transition-colors"
+              >
+                ↓ New messages
+              </button>
+            )}
             <button
-              onClick={enableAutoScroll}
-              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+              onClick={clearMessages}
+              className="p-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
+              title="Clear Chat"
             >
-              ↓ New messages
+              <Trash2 className="w-4 h-4" />
             </button>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Enhanced Messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-3"
+        className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50"
         onScroll={handleScroll}
         style={{ minHeight: 0 }}
       >
@@ -165,39 +219,72 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-lg p-3 ${
+              className={`max-w-[85%] rounded-2xl p-4 shadow-sm relative group ${
                 message.type === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
                   : message.type === 'system'
-                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                  : 'bg-slate-100 text-slate-800'
+                  ? 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 border border-amber-200'
+                  : 'bg-white text-slate-800 border border-slate-200'
               }`}
             >
+              {/* Message Header */}
               {(message.type === 'ai' || message.type === 'system') && (
-                <div className="text-xs font-medium mb-1 opacity-75">
-                  {message.sender}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">{getMessageIcon(message.type)}</span>
+                    <span className="text-xs font-semibold opacity-75">
+                      {message.sender}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => copyMessage(message.content)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-black/10 rounded"
+                    title="Copy message"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap break-words">{message.content}</div>
-              <div className={`text-xs mt-1 opacity-75 ${
+
+              {/* Message Content */}
+              <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                {message.content}
+              </div>
+
+              {/* Message Footer */}
+              <div className={`text-xs mt-2 opacity-75 flex items-center justify-between ${
                 message.type === 'user' 
                   ? 'text-blue-100' 
                   : message.type === 'system'
                   ? 'text-amber-600'
                   : 'text-slate-500'
               }`}>
-                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <span>
+                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                {message.type === 'user' && (
+                  <button
+                    onClick={() => copyMessage(message.content)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/20 rounded"
+                    title="Copy message"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
         ))}
+        
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 text-slate-800 rounded-lg p-3 max-w-[85%]">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+            <div className="bg-white text-slate-800 rounded-2xl p-4 max-w-[85%] border border-slate-200 shadow-sm">
+              <div className="flex items-center space-x-3">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
                 <span className="text-sm text-slate-600">Expert is responding...</span>
               </div>
             </div>
@@ -206,33 +293,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-slate-200 flex-shrink-0">
-        <div className="flex items-end space-x-2">
+      {/* Enhanced Input */}
+      <div className="bg-white border-t border-slate-200 p-4">
+        <div className="flex items-end space-x-3">
           <div className="flex-1">
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Ask questions about the topic or request clarification..."
-              className="w-full p-3 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full p-3 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all"
               rows={2}
-              disabled={isProcessing}
+              disabled={isProcessing || !isConnected}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isProcessing}
-            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            disabled={!inputValue.trim() || isProcessing || !isConnected}
+            className="p-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg flex-shrink-0"
             title="Send Message"
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-5 h-5" />
           </button>
         </div>
         
-        <div className="mt-2 text-xs text-slate-500">
-          💡 Ask specific questions to guide the expert discussion or request deeper analysis on particular points
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+          <span>💡 Ask specific questions to guide the expert discussion</span>
+          <div className="flex items-center space-x-2">
+            <RefreshCw className={`w-3 h-3 ${isConnected ? 'text-green-500' : 'text-red-500'}`} />
+            <span>{isConnected ? 'Live' : 'Reconnecting...'}</span>
+          </div>
         </div>
       </div>
     </div>
