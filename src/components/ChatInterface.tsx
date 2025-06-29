@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare, Sparkles } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -8,6 +8,7 @@ interface Message {
   sender: string;
   timestamp: Date;
   type: 'user' | 'ai' | 'system';
+  agentId?: string;
 }
 
 interface ChatInterfaceProps {
@@ -36,6 +37,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [autoScroll, setAutoScroll] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const agentColors = {
+    'chen': 'bg-purple-100 text-purple-800 border-purple-200',
+    'thompson': 'bg-blue-100 text-blue-800 border-blue-200',
+    'rodriguez': 'bg-green-100 text-green-800 border-green-200',
+    'kim': 'bg-orange-100 text-orange-800 border-orange-200'
+  };
+
+  const agentAvatars = {
+    'chen': '👩‍🔬',
+    'thompson': '👨‍💼',
+    'rodriguez': '👩‍🏫',
+    'kim': '👨‍💻'
+  };
 
   const scrollToBottom = () => {
     if (autoScroll) {
@@ -71,7 +86,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         content: data.message,
         sender: data.agentName,
         timestamp: new Date(data.timestamp),
-        type: 'ai'
+        type: 'ai',
+        agentId: data.agentId
       };
       setMessages(prev => [...prev, aiMessage]);
     });
@@ -132,19 +148,34 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   };
 
+  const getAgentColor = (agentId?: string) => {
+    if (!agentId) return 'bg-slate-100 text-slate-800 border-slate-200';
+    return agentColors[agentId as keyof typeof agentColors] || 'bg-slate-100 text-slate-800 border-slate-200';
+  };
+
+  const getAgentAvatar = (agentId?: string) => {
+    if (!agentId) return '🤖';
+    return agentAvatars[agentId as keyof typeof agentAvatars] || '🤖';
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-slate-200">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
+      {/* Modern Header */}
+      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <MessageSquare className="w-5 h-5 text-slate-600" />
-            <h3 className="font-medium text-slate-800">Discussion Chat</h3>
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-white">Discussion Chat</h3>
+              <p className="text-xs text-slate-300">Join the expert conversation</p>
+            </div>
           </div>
           {!autoScroll && (
             <button
               onClick={enableAutoScroll}
-              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+              className="text-xs px-3 py-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
             >
               ↓ New messages
             </button>
@@ -155,7 +186,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white"
         onScroll={handleScroll}
       >
         {messages.map((message) => (
@@ -164,21 +195,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${
+              className={`max-w-[85%] rounded-2xl p-4 shadow-sm border transition-all duration-200 hover:shadow-md ${
                 message.type === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border-blue-600'
                   : message.type === 'system'
-                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                  : 'bg-slate-100 text-slate-800'
+                  ? 'bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 border-amber-200'
+                  : `${getAgentColor(message.agentId)} border`
               }`}
             >
               {(message.type === 'ai' || message.type === 'system') && (
-                <div className="text-xs font-medium mb-1 opacity-75">
-                  {message.sender}
+                <div className="flex items-center space-x-2 mb-2">
+                  {message.type === 'ai' && (
+                    <span className="text-lg">{getAgentAvatar(message.agentId)}</span>
+                  )}
+                  {message.type === 'system' && (
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                  )}
+                  <div className="text-xs font-bold opacity-90">
+                    {message.sender}
+                  </div>
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap">{message.content}</div>
-              <div className={`text-xs mt-1 opacity-75 ${
+              <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                {message.content}
+              </div>
+              <div className={`text-xs mt-2 opacity-75 ${
                 message.type === 'user' 
                   ? 'text-blue-100' 
                   : message.type === 'system'
@@ -192,12 +233,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         ))}
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 text-slate-800 rounded-lg p-3 max-w-[80%]">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                <span className="text-sm text-slate-600">Expert is responding...</span>
+            <div className="bg-gradient-to-r from-slate-100 to-slate-200 text-slate-800 rounded-2xl p-4 max-w-[85%] border border-slate-200">
+              <div className="flex items-center space-x-3">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+                <span className="text-sm text-slate-600 font-medium">Expert is analyzing...</span>
               </div>
             </div>
           </div>
@@ -205,16 +248,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-slate-200">
-        <div className="flex items-end space-x-2">
+      {/* Modern Input */}
+      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200">
+        <div className="flex items-end space-x-3">
           <div className="flex-1">
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Ask questions about the topic or request clarification..."
-              className="w-full p-3 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full p-4 border-2 border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white shadow-sm"
               rows={2}
               disabled={isProcessing}
             />
@@ -223,15 +266,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isProcessing}
-            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
             title="Send Message"
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-5 h-5" />
           </button>
         </div>
         
-        <div className="mt-2 text-xs text-slate-500">
-          💡 Ask specific questions to guide the expert discussion or request deeper analysis on particular points
+        <div className="mt-3 text-xs text-slate-500 flex items-center space-x-2">
+          <Sparkles className="w-3 h-3" />
+          <span>Ask specific questions to guide the expert discussion or request deeper analysis</span>
         </div>
       </div>
     </div>

@@ -31,8 +31,9 @@ const agents = [
     role: 'Research Analyst',
     personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
     expertise: 'research methodology, data analysis, statistical significance, peer review standards',
-    voiceId: 'EXAVITQu4vr4xnSDxMaL', // Bella - professional female voice
-    style: 'analytical and precise, focuses on empirical evidence and research rigor'
+    voiceId: 'EXAVITQu4vr4xnSDxMaL',
+    style: 'analytical and precise, focuses on empirical evidence and research rigor',
+    weight: 1.0 // Base weight for random selection
   },
   {
     id: 'thompson',
@@ -40,8 +41,9 @@ const agents = [
     role: 'Strategy Expert',
     personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
     expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment',
-    voiceId: 'pNInz6obpgDQGcFmaJgB', // Adam - confident male voice
-    style: 'direct and business-focused, evaluates practical applications and market viability'
+    voiceId: 'pNInz6obpgDQGcFmaJgB',
+    style: 'direct and business-focused, evaluates practical applications and market viability',
+    weight: 1.0
   },
   {
     id: 'rodriguez',
@@ -49,8 +51,9 @@ const agents = [
     role: 'Domain Specialist',
     personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
     expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections',
-    voiceId: 'XB0fDUnXU5powFXDhCwa', // Charlotte - academic female voice
-    style: 'scholarly and thorough, connects concepts to broader theoretical frameworks'
+    voiceId: 'XB0fDUnXU5powFXDhCwa',
+    style: 'scholarly and thorough, connects concepts to broader theoretical frameworks',
+    weight: 1.0
   },
   {
     id: 'kim',
@@ -58,10 +61,91 @@ const agents = [
     role: 'Innovation Lead',
     personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
     expertise: 'emerging technologies, future trends, disruptive innovation, technological implications',
-    voiceId: 'onwK4e9ZLuTAKqWW03F9', // Daniel - energetic male voice
-    style: 'visionary and provocative, explores cutting-edge possibilities and future implications'
+    voiceId: 'onwK4e9ZLuTAKqWW03F9',
+    style: 'visionary and provocative, explores cutting-edge possibilities and future implications',
+    weight: 1.0
   }
 ];
+
+// Enhanced agent selection with weighted randomness
+function selectNextAgent(lastSpeaker, conversationHistory, userInput = null) {
+  // Filter out the last speaker to avoid repetition
+  const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
+  
+  if (userInput) {
+    // If user asked a question, select most relevant expert with some randomness
+    const relevanceScores = availableAgents.map(agent => {
+      let score = agent.weight;
+      const input = userInput.toLowerCase();
+      
+      if (input.includes('research') || input.includes('data') || input.includes('evidence')) {
+        score += agent.id === 'chen' ? 2.0 : 0;
+      }
+      if (input.includes('business') || input.includes('strategy') || input.includes('market')) {
+        score += agent.id === 'thompson' ? 2.0 : 0;
+      }
+      if (input.includes('theory') || input.includes('academic') || input.includes('framework')) {
+        score += agent.id === 'rodriguez' ? 2.0 : 0;
+      }
+      if (input.includes('future') || input.includes('innovation') || input.includes('technology')) {
+        score += agent.id === 'kim' ? 2.0 : 0;
+      }
+      
+      // Add some randomness
+      score += Math.random() * 0.5;
+      
+      return { agent, score };
+    });
+    
+    // Sort by score and pick from top 2 with weighted probability
+    relevanceScores.sort((a, b) => b.score - a.score);
+    const topAgents = relevanceScores.slice(0, 2);
+    const totalScore = topAgents.reduce((sum, item) => sum + item.score, 0);
+    
+    let random = Math.random() * totalScore;
+    for (const item of topAgents) {
+      random -= item.score;
+      if (random <= 0) {
+        return item.agent;
+      }
+    }
+    
+    return topAgents[0].agent;
+  } else {
+    // Random selection with conversation flow consideration
+    const recentSpeakers = conversationHistory.slice(-4).map(msg => {
+      const speakerMatch = msg.match(/^([^:]+):/);
+      return speakerMatch ? speakerMatch[1] : null;
+    }).filter(Boolean);
+    
+    // Adjust weights based on recent participation
+    const adjustedAgents = availableAgents.map(agent => {
+      let weight = agent.weight;
+      const recentCount = recentSpeakers.filter(speaker => speaker.includes(agent.name)).length;
+      
+      // Reduce weight if agent spoke recently
+      weight *= Math.max(0.3, 1 - (recentCount * 0.3));
+      
+      // Add randomness
+      weight += Math.random() * 0.3;
+      
+      return { agent, weight };
+    });
+    
+    // Weighted random selection
+    const totalWeight = adjustedAgents.reduce((sum, item) => sum + item.weight, 0);
+    let random = Math.random() * totalWeight;
+    
+    for (const item of adjustedAgents) {
+      random -= item.weight;
+      if (random <= 0) {
+        return item.agent;
+      }
+    }
+    
+    return adjustedAgents[0].agent;
+  }
+}
 
 // Generate AI response with enhanced personality and focus
 async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null) {
@@ -83,6 +167,7 @@ CRITICAL INSTRUCTIONS:
 - Challenge or support specific points with your expertise
 - Keep responses focused, insightful, and 2-3 sentences maximum
 - Maintain your distinct personality and perspective
+- Bring fresh insights while staying on topic
 
 Current focused discussion topic: ${context}
 
@@ -142,9 +227,9 @@ async function generateSpeech(text, voiceId, elevenLabsApiKey) {
 // Calculate estimated audio duration
 function estimateAudioDuration(text) {
   const words = text.split(' ').length;
-  const wordsPerMinute = 160; // Slightly faster for focused discussion
+  const wordsPerMinute = 160;
   const durationSeconds = (words / wordsPerMinute) * 60;
-  return Math.max(durationSeconds * 1000, 2500); // Minimum 2.5 seconds
+  return Math.max(durationSeconds * 1000, 2500);
 }
 
 // Process content with multimodal support
@@ -162,7 +247,6 @@ app.post('/api/process-content', async (req, res) => {
     let multimodalContent = [];
 
     if (type === 'multimodal' && content.images && content.images.length > 0) {
-      // Handle multimodal content with images
       analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
 
 Text content: ${content.text}
@@ -178,10 +262,8 @@ Create a structured analysis for expert discussion:
 
 The discussion must stay strictly within this topic scope. Experts should not deviate to general or unrelated topics.`;
 
-      // Add text content
       multimodalContent.push({ text: analysisPrompt });
 
-      // Add images
       content.images.forEach(image => {
         multimodalContent.push({
           inlineData: {
@@ -191,7 +273,6 @@ The discussion must stay strictly within this topic scope. Experts should not de
         });
       });
     } else {
-      // Handle text-only content
       const textContent = typeof content === 'object' ? content.text : content;
       
       analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
@@ -229,9 +310,10 @@ Keep the analysis concise but comprehensive for a focused 5-15 minute expert dis
       currentSpeaker: null,
       conversationQueue: [],
       totalMessages: 0,
-      maxMessages: 20, // Focused discussion limit
+      maxMessages: 15, // Limited focused discussion
       nextTimeout: null,
-      topicBoundaries: analysis // Store for reference
+      topicBoundaries: analysis,
+      lastSpeakers: [] // Track recent speakers for better randomization
     });
 
     res.json({ success: true, analysis });
@@ -282,6 +364,7 @@ Stay strictly within the topic boundaries defined in the analysis.`;
       session.conversationHistory.push(`${openingAgent.name}: ${message}`);
       session.currentSpeaker = openingAgent.id;
       session.totalMessages++;
+      session.lastSpeakers = [openingAgent.id];
 
       // Generate speech
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
@@ -297,10 +380,11 @@ Stay strictly within the topic boundaries defined in the analysis.`;
         timestamp: new Date()
       });
 
-      // Start the synchronized conversation loop
+      // Start the synchronized conversation loop with random timing
+      const randomDelay = 2000 + Math.random() * 2000; // 2-4 seconds
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 2000); // Reduced pause for focused discussion
+      }, audioDuration + randomDelay);
 
     } catch (error) {
       console.error('Conversation start error:', error);
@@ -334,9 +418,10 @@ Stay strictly within the topic boundaries defined in the analysis.`;
       });
 
       // Wait a moment then have an agent respond
+      const responseDelay = 1500 + Math.random() * 1000; // 1.5-2.5 seconds
       session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
-      }, 1500);
+      }, responseDelay);
 
     } catch (error) {
       console.error('User message error:', error);
@@ -362,10 +447,11 @@ Stay strictly within the topic boundaries defined in the analysis.`;
       session.isPaused = false;
       io.to(sessionId).emit('conversation-resumed');
       
-      // Resume conversation after a short delay
+      // Resume conversation after a random delay
+      const resumeDelay = 1500 + Math.random() * 1000;
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
-      }, 1500);
+      }, resumeDelay);
     }
   });
 
@@ -386,10 +472,16 @@ Stay strictly within the topic boundaries defined in the analysis.`;
   });
 });
 
-// Synchronized conversation function
+// Synchronized conversation function with random agent selection
 async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
+    if (session && session.totalMessages >= session.maxMessages) {
+      // End conversation
+      io.to(sessionId).emit('conversation-ended', {
+        message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
+      });
+    }
     return;
   }
 
@@ -400,7 +492,7 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   }
 }
 
-// Generate next agent response with enhanced focus
+// Generate next agent response with enhanced random selection
 async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, userInput = null) {
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
@@ -408,28 +500,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   }
 
   try {
-    // Select next agent strategically (avoid same agent speaking twice in a row)
-    const lastSpeaker = session.currentSpeaker;
-    const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
-    
-    // Prioritize agents based on conversation flow and expertise relevance
-    let nextAgent;
-    if (userInput) {
-      // If user asked a question, select most relevant expert
-      if (userInput.toLowerCase().includes('research') || userInput.toLowerCase().includes('data')) {
-        nextAgent = agents.find(a => a.id === 'chen') || availableAgents[0];
-      } else if (userInput.toLowerCase().includes('business') || userInput.toLowerCase().includes('strategy')) {
-        nextAgent = agents.find(a => a.id === 'thompson') || availableAgents[0];
-      } else if (userInput.toLowerCase().includes('theory') || userInput.toLowerCase().includes('academic')) {
-        nextAgent = agents.find(a => a.id === 'rodriguez') || availableAgents[0];
-      } else if (userInput.toLowerCase().includes('future') || userInput.toLowerCase().includes('innovation')) {
-        nextAgent = agents.find(a => a.id === 'kim') || availableAgents[0];
-      } else {
-        nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
-      }
-    } else {
-      nextAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
-    }
+    // Select next agent using enhanced random selection
+    const nextAgent = selectNextAgent(session.currentSpeaker, session.conversationHistory, userInput);
 
     const response = await generateAgentResponse(
       geminiApiKey,
@@ -442,6 +514,9 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     session.conversationHistory.push(`${nextAgent.name}: ${response}`);
     session.currentSpeaker = nextAgent.id;
     session.totalMessages++;
+    
+    // Update last speakers tracking
+    session.lastSpeakers = [nextAgent.id, ...(session.lastSpeakers || [])].slice(0, 3);
 
     // Generate speech
     const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
@@ -457,11 +532,12 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       timestamp: new Date()
     });
 
-    // Schedule next response after current audio finishes
+    // Schedule next response with random timing
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused) {
+      const nextDelay = 2000 + Math.random() * 3000; // 2-5 seconds for natural flow
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
-      }, audioDuration + 2000); // Reduced pause for focused discussion
+      }, audioDuration + nextDelay);
     } else if (session.totalMessages >= session.maxMessages) {
       // End conversation
       session.nextTimeout = setTimeout(() => {
