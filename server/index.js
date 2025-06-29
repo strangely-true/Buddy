@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import axios from 'axios';
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -20,6 +21,18 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+// Initialize Supabase client
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let supabase = null;
+
+if (supabaseUrl && supabaseServiceKey) {
+  supabase = createClient(supabaseUrl, supabaseServiceKey);
+  console.log('Supabase client initialized');
+} else {
+  console.warn('Supabase credentials not found - database features disabled');
+}
+
 // Enhanced logging function
 function log(level, message, data = null) {
   const timestamp = new Date().toISOString();
@@ -32,10 +45,10 @@ function log(level, message, data = null) {
   }
 }
 
-// Store active sessions
+// Store active sessions (for real-time state management)
 const sessions = new Map();
 
-// AI Agents configuration with DISTINCT system prompts and personalities
+// AI Agents configuration
 const agents = [
   {
     id: 'chen',
@@ -158,6 +171,157 @@ FOCUS AREAS:
 Stay strictly within the topic boundaries. Challenge other experts by introducing innovative perspectives and future possibilities.`
   }
 ];
+
+// Database helper functions
+async function createConversationInDB(sessionId, userId, title, topicAnalysis, contentType) {
+  if (!supabase) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({
+        session_id: sessionId,
+        user_id: userId,
+        title: title,
+        topic_analysis: topicAnalysis,
+        content_type: contentType || 'text prompt',
+        status: 'active',
+        total_messages: 0,
+        duration_seconds: 0
+      })
+      .select()
+      .single();
+
+    if (error) {
+      log('error', 'Database error creating conversation', error);
+      return null;
+    }
+
+    log('info', 'Conversation created in database', { conversationId: data.id });
+    return data;
+  } catch (error) {
+    log('error', 'Error creating conversation in database', error);
+    return null;
+  }
+}
+
+async function addMessageToDB(conversationId, speakerId, speakerName, messageContent, messageType, audioDuration = 0) {
+  if (!supabase || !conversationId) return null;
+  
+  try {
+    // Get current message count for sequence number
+    const { count } = await supabase
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+
+    const { data, error } = await supabase
+      .from('conversation_messages')
+      .insert({
+        conversation_id: conversationId,
+        speaker_id: speakerId,
+        speaker_name: speakerName,
+        message_content: messageContent,
+        message_type: messageType,
+        audio_duration: audioDuration,
+        sequence_number: (count || 0) + 1
+      })
+      .select()
+      .single();
+
+    if (error) {
+      log('error', 'Database error adding message', error);
+      return null;
+    }
+
+    // Update conversation stats
+    await updateConversationStats(conversationId);
+    return data;
+  } catch (error) {
+    log('error', 'Error adding message to database', error);
+    return null;
+  }
+}
+
+async function updateConversationStats(conversationId) {
+  if (!supabase || !conversationId) return;
+  
+  try {
+    // Get message count
+    const { count } = await supabase
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+
+    // Get total audio duration
+    const { data: messages } = await supabase
+      .from('conversation_messages')
+      .select('audio_duration')
+      .eq('conversation_id', conversationId);
+
+    const totalDuration = messages?.reduce((sum, msg) => sum + (msg.audio_duration || 0), 0) || 0;
+
+    await supabase
+      .from('conversations')
+      .update({ 
+        total_messages: count || 0,
+        duration_seconds: Math.floor(totalDuration / 1000),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', conversationId);
+
+    log('info', 'Conversation stats updated', { conversationId, totalMessages: count, totalDuration });
+  } catch (error) {
+    log('error', 'Error updating conversation stats', error);
+  }
+}
+
+async function updateConversationStatus(conversationId, status) {
+  if (!supabase || !conversationId) return;
+  
+  try {
+    await supabase
+      .from('conversations')
+      .update({ 
+        status: status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', conversationId);
+
+    log('info', 'Conversation status updated', { conversationId, status });
+  } catch (error) {
+    log('error', 'Error updating conversation status', error);
+  }
+}
+
+// Generate conversation title from content
+function generateConversationTitle(content, contentType) {
+  const maxLength = 60;
+  
+  if (contentType === 'multimodal') {
+    return 'Multimodal Analysis Discussion';
+  }
+  
+  const textContent = typeof content === 'object' ? content.text : content;
+  
+  // Extract first meaningful sentence or phrase
+  const sentences = textContent.split(/[.!?]+/);
+  const firstSentence = sentences[0]?.trim();
+  
+  if (firstSentence && firstSentence.length <= maxLength) {
+    return firstSentence;
+  }
+  
+  // Truncate and add ellipsis
+  const truncated = textContent.substring(0, maxLength).trim();
+  const lastSpace = truncated.lastIndexOf(' ');
+  
+  if (lastSpace > maxLength * 0.7) {
+    return truncated.substring(0, lastSpace) + '...';
+  }
+  
+  return truncated + '...';
+}
 
 // Generate AI response with DISTINCT personality-driven prompts
 async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null) {
@@ -298,7 +462,15 @@ Time limit: 5-15 minutes of focused expert discussion.`;
     });
 
     const analysis = response.text;
-    log('info', 'Content analysis completed', { analysisLength: analysis.length });
+    const title = generateConversationTitle(content, type);
+    log('info', 'Content analysis completed', { analysisLength: analysis.length, title });
+
+    // Create conversation in database if user is provided
+    let conversationId = null;
+    if (userId && supabase) {
+      const conversation = await createConversationInDB(sessionId, userId, title, analysis, type);
+      conversationId = conversation?.id || null;
+    }
 
     // Store session data with proper initialization
     const sessionData = {
@@ -315,14 +487,17 @@ Time limit: 5-15 minutes of focused expert discussion.`;
       startTime: null, // Will be set when conversation actually starts
       maxDuration: 15 * 60 * 1000,
       userId: userId,
+      conversationId: conversationId,
       status: 'prepared', // prepared -> active -> ended
+      title: title,
+      contentType: type,
       createdAt: Date.now()
     };
 
     sessions.set(sessionId, sessionData);
-    log('info', 'Session created successfully', { sessionId, status: sessionData.status });
+    log('info', 'Session created successfully', { sessionId, status: sessionData.status, conversationId });
 
-    res.json({ success: true, analysis });
+    res.json({ success: true, analysis, title });
   } catch (error) {
     log('error', 'Content processing error', error);
     res.status(500).json({ error: 'Failed to process content' });
@@ -370,6 +545,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (session.isActive) {
+      log('warn', `Session already active: ${sessionId}`);
+      return;
+    }
+
     // Initialize session for active conversation
     session.isActive = true;
     session.startTime = Date.now();
@@ -406,6 +586,18 @@ Your opening statement:`;
       session.totalMessages++;
 
       log('info', 'Opening statement generated', { agentName: openingAgent.name, messageLength: message.length });
+
+      // Store message in database
+      if (session.conversationId) {
+        await addMessageToDB(
+          session.conversationId,
+          openingAgent.id,
+          openingAgent.name,
+          message,
+          'ai',
+          estimateAudioDuration(message)
+        );
+      }
 
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
       const audioDuration = estimateAudioDuration(message);
@@ -456,6 +648,23 @@ Your opening statement:`;
       }
 
       session.conversationHistory.push(`User: ${message}`);
+
+      // Store user message in database
+      if (session.conversationId) {
+        await addMessageToDB(
+          session.conversationId,
+          'user',
+          'User',
+          message,
+          'user'
+        );
+      }
+
+      // Emit user message to all clients for synchronization
+      io.to(sessionId).emit('user-message', {
+        message,
+        timestamp: new Date()
+      });
 
       // Schedule agent response
       session.nextTimeout = setTimeout(async () => {
@@ -509,6 +718,11 @@ Your opening statement:`;
         clearTimeout(session.nextTimeout);
         session.nextTimeout = null;
       }
+
+      // Update conversation status in database
+      if (session.conversationId) {
+        updateConversationStatus(session.conversationId, 'completed');
+      }
       
       // Clean up session after delay
       setTimeout(() => {
@@ -543,6 +757,12 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
     log('info', 'Conversation limits reached', { elapsed, totalMessages: session.totalMessages });
     session.isActive = false;
     session.status = 'ended';
+    
+    // Update conversation status in database
+    if (session.conversationId) {
+      updateConversationStatus(session.conversationId, 'completed');
+    }
+    
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -574,6 +794,12 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     log('info', 'Agent response cancelled - limits reached', { elapsed, totalMessages: session.totalMessages });
     session.isActive = false;
     session.status = 'ended';
+    
+    // Update conversation status in database
+    if (session.conversationId) {
+      updateConversationStatus(session.conversationId, 'completed');
+    }
+    
     io.to(sessionId).emit('conversation-ended', {
       message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic within the time limit.'
     });
@@ -616,8 +842,20 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     session.currentSpeaker = nextAgent.id;
     session.totalMessages++;
 
-    const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
+    // Store message in database
     const audioDuration = estimateAudioDuration(response);
+    if (session.conversationId) {
+      await addMessageToDB(
+        session.conversationId,
+        nextAgent.id,
+        nextAgent.name,
+        response,
+        'ai',
+        audioDuration
+      );
+    }
+
+    const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
 
     io.to(sessionId).emit('agent-message', {
       agentId: nextAgent.id,
@@ -647,6 +885,12 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       log('info', 'Ending conversation - limits reached or session ending');
       session.isActive = false;
       session.status = 'ended';
+      
+      // Update conversation status in database
+      if (session.conversationId) {
+        updateConversationStatus(session.conversationId, 'completed');
+      }
+      
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
@@ -658,6 +902,45 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     log('error', 'Next agent response error', error);
   }
 }
+
+// Get conversation messages endpoint
+app.get('/api/conversation/:sessionId/messages', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!supabase) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+
+    // Get conversation by session ID
+    const { data: conversation, error: convError } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('session_id', sessionId)
+      .single();
+
+    if (convError || !conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    // Get messages
+    const { data: messages, error: msgError } = await supabase
+      .from('conversation_messages')
+      .select('*')
+      .eq('conversation_id', conversation.id)
+      .order('sequence_number', { ascending: true });
+
+    if (msgError) {
+      log('error', 'Error getting conversation messages', msgError);
+      return res.status(500).json({ error: 'Failed to get messages' });
+    }
+
+    res.json({ messages: messages || [] });
+  } catch (error) {
+    log('error', 'Error in get conversation messages endpoint', error);
+    res.status(500).json({ error: 'Failed to get messages' });
+  }
+});
 
 // Add session status endpoint for debugging
 app.get('/api/session/:sessionId/status', (req, res) => {
@@ -676,7 +959,8 @@ app.get('/api/session/:sessionId/status', (req, res) => {
     totalMessages: session.totalMessages,
     startTime: session.startTime,
     createdAt: session.createdAt,
-    currentSpeaker: session.currentSpeaker
+    currentSpeaker: session.currentSpeaker,
+    conversationId: session.conversationId
   });
 });
 
@@ -687,7 +971,8 @@ app.get('/api/sessions', (req, res) => {
     status: session.status,
     isActive: session.isActive,
     totalMessages: session.totalMessages,
-    createdAt: session.createdAt
+    createdAt: session.createdAt,
+    conversationId: session.conversationId
   }));
   
   res.json({ sessions: sessionList, count: sessionList.length });

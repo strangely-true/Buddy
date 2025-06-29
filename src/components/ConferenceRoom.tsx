@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, Mic, MicOff, AlertCircle } from 'lucide-react';
+import { Volume2, VolumeX, Users, PhoneOff, Pause, Play, Clock, Mic, MicOff, AlertCircle, RefreshCw } from 'lucide-react';
 import AIParticipant from './AIParticipant';
 import io, { Socket } from 'socket.io-client';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +32,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [maxMessages] = useState(18);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
   const [error, setError] = useState<string | null>(null);
+  const [conversationStarted, setConversationStarted] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const cleanupRef = useRef<boolean>(false);
   const socketRef = useRef<Socket | null>(null);
@@ -47,7 +48,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   // Enhanced logging function
   const log = (level: string, message: string, data?: any) => {
     const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] [FRONTEND-${level.toUpperCase()}] ${message}`;
+    const logMessage = `[${timestamp}] [CONFERENCE-${level.toUpperCase()}] ${message}`;
     
     if (data) {
       console.log(logMessage, data);
@@ -130,6 +131,29 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     setConversationStatus('ended');
   };
 
+  const startConversation = () => {
+    if (!socket || conversationStarted || cleanupRef.current) {
+      log('warn', 'Cannot start conversation', { 
+        hasSocket: !!socket, 
+        conversationStarted, 
+        cleanupRef: cleanupRef.current 
+      });
+      return;
+    }
+
+    log('info', 'Manually starting conversation');
+    setConversationStarted(true);
+    setConversationStatus('preparing');
+    setCurrentTopic('AI experts are starting the discussion...');
+    
+    socket.emit('start-conversation', {
+      sessionId,
+      geminiApiKey,
+      elevenLabsApiKey,
+      userId: user?.id
+    });
+  };
+
   useEffect(() => {
     if (cleanupRef.current || initializationRef.current) return;
     initializationRef.current = true;
@@ -179,21 +203,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       log('info', 'Received session status', data);
       if (data.status === 'prepared') {
         setConversationStatus('preparing');
-        setCurrentTopic('AI experts are preparing for discussion...');
+        setCurrentTopic('Session prepared. Click "Start Discussion" to begin.');
         setIsCallActive(true);
-        
-        // Auto-start the conversation
-        setTimeout(() => {
-          if (!cleanupRef.current) {
-            log('info', 'Auto-starting conversation');
-            newSocket.emit('start-conversation', {
-              sessionId,
-              geminiApiKey,
-              elevenLabsApiKey,
-              userId: user?.id
-            });
-          }
-        }, 1000);
       }
     });
 
@@ -269,7 +280,9 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     newSocket.on('error', (error) => {
       log('error', 'Socket error received', error);
       setError(typeof error === 'string' ? error : 'An error occurred');
-      setConversationStatus('error');
+      if (error === 'Session not found') {
+        setConversationStatus('error');
+      }
     });
 
     return () => {
@@ -369,7 +382,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       case 'initializing':
         return <span className="px-3 py-1 text-xs rounded-full bg-blue-100 text-blue-800 font-medium">Initializing</span>;
       case 'preparing':
-        return <span className="px-3 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">Preparing</span>;
+        return <span className="px-3 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">Ready to Start</span>;
       case 'active':
         return <span className="px-3 py-1 text-xs rounded-full bg-green-100 text-green-800 font-medium">Live Discussion</span>;
       case 'paused':
@@ -448,6 +461,17 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           </div>
           
           <div className="flex items-center space-x-3">
+            {/* Start Discussion Button */}
+            {conversationStatus === 'preparing' && !conversationStarted && (
+              <button
+                onClick={startConversation}
+                disabled={connectionStatus !== 'connected'}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+              >
+                Start Discussion
+              </button>
+            )}
+
             {/* Control Buttons */}
             <div className="flex items-center space-x-2 bg-slate-100 rounded-lg p-1">
               {/* Pause/Resume Button */}
@@ -577,14 +601,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
           
           {conversationStatus === 'initializing' && (
             <div className="flex items-center justify-center space-x-2 text-sm text-blue-600">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+              <RefreshCw className="w-4 h-4 animate-spin" />
               <span>Connecting to AI conference system...</span>
             </div>
           )}
           
-          {conversationStatus === 'preparing' && (
+          {conversationStatus === 'preparing' && !conversationStarted && (
+            <div className="flex items-center justify-center space-x-2 text-sm text-green-600">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span>Ready to start! Click "Start Discussion" to begin the expert panel.</span>
+            </div>
+          )}
+
+          {conversationStatus === 'preparing' && conversationStarted && (
             <div className="flex items-center justify-center space-x-2 text-sm text-yellow-600">
-              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+              <RefreshCw className="w-4 h-4 animate-spin" />
               <span>AI experts are analyzing your topic and preparing discussion...</span>
             </div>
           )}

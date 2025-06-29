@@ -28,27 +28,31 @@ function AppContent() {
   }, [])
 
   const handleSessionStart = (newSessionId: string) => {
+    console.log('Starting new session:', newSessionId)
     setSessionId(newSessionId)
     setHasSession(true)
     setCurrentView('conference')
   }
 
   const handleEndCall = () => {
+    console.log('Ending call, clearing session state')
     setHasSession(false)
     setSessionId('')
     setCurrentView('dashboard')
   }
 
   const handleStartNewConference = () => {
+    console.log('Starting new conference')
     setHasSession(false)
     setSessionId('')
     setCurrentView('prompt')
   }
 
   const handleResumeConference = (sessionId: string) => {
-    console.log('Resume conference:', sessionId)
-    // For now, just start a new conference
-    handleStartNewConference()
+    console.log('Resuming conference:', sessionId)
+    setSessionId(sessionId)
+    setHasSession(true)
+    setCurrentView('conference')
   }
 
   const handleApiKeySave = (geminiKey: string, elevenLabsKey?: string) => {
