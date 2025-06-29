@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { MessageCircle, Settings, Sparkles, Key, AlertTriangle } from 'lucide-react'
 import Header from './components/Header'
-import Footer from './components/Footer'
 import ConferenceRoom from './components/ConferenceRoom'
 import ChatInterface from './components/ChatInterface'
 import ApiKeyModal from './components/ApiKeyModal'
@@ -280,8 +279,6 @@ function App() {
           </div>
         </div>
       )}
-
-      <Footer />
 
       <ApiKeyModal
         isOpen={showApiKeyModal}
