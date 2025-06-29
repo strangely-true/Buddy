@@ -27,10 +27,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [conversationStatus, setConversationStatus] = useState('preparing');
   const [isPaused, setIsPaused] = useState(false);
   const [messageCount, setMessageCount] = useState(0);
-  const [maxMessages] = useState(15); // Limited focused discussion
+  const [maxMessages] = useState(15);
   const [discussionTime, setDiscussionTime] = useState(0);
   const [isEnding, setIsEnding] = useState(false);
   const [isManualEnd, setIsManualEnd] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false); // Prevent multiple end calls
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
@@ -70,7 +71,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   // Timer for discussion duration
   useEffect(() => {
-    if (conversationStatus === 'active' && !isPaused && !isEnding) {
+    if (conversationStatus === 'active' && !isPaused && !isEnding && !hasEnded) {
       timerRef.current = setInterval(() => {
         setDiscussionTime(prev => prev + 1);
       }, 1000);
@@ -86,7 +87,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         clearInterval(timerRef.current);
       }
     };
-  }, [conversationStatus, isPaused, isEnding]);
+  }, [conversationStatus, isPaused, isEnding, hasEnded]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -95,6 +96,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   useEffect(() => {
+    if (hasEnded) return; // Don't initialize if already ended
+
     // Initialize socket connection
     const newSocket = io('http://localhost:3001');
     setSocket(newSocket);
@@ -104,61 +107,69 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for agent messages
     newSocket.on('agent-message', (data) => {
-      if (isEnding) return; // Don't process new messages if ending
+      if (isEnding || hasEnded) return;
       
       setActiveParticipant(data.agentId);
       setCurrentTopic('AI Expert Discussion in Progress');
       setConversationStatus('active');
       setMessageCount(prev => prev + 1);
       
-      // Play audio if available, speaker is on, and not paused
       if (data.audio && isSpeakerOn && !isPaused && !isEnding) {
         playAudio(data.audio, data.audioDuration || 5000);
       } else if (data.audioDuration) {
-        // Even without audio, simulate the speaking duration
         setTimeout(() => {
-          setActiveParticipant(null);
+          if (!isEnding && !hasEnded) {
+            setActiveParticipant(null);
+          }
         }, data.audioDuration);
       } else {
-        // Default timeout if no duration provided
         setTimeout(() => {
-          setActiveParticipant(null);
+          if (!isEnding && !hasEnded) {
+            setActiveParticipant(null);
+          }
         }, 5000);
       }
     });
 
     // Listen for conversation pause/resume
     newSocket.on('conversation-paused', () => {
-      setIsPaused(true);
-      if (currentAudio) {
-        currentAudio.pause();
+      if (!hasEnded) {
+        setIsPaused(true);
+        if (currentAudio) {
+          currentAudio.pause();
+        }
       }
     });
 
     newSocket.on('conversation-resumed', () => {
-      setIsPaused(false);
+      if (!hasEnded) {
+        setIsPaused(false);
+      }
     });
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
-      if (isEnding) return; // Prevent double processing
+      if (isEnding || hasEnded) return;
       
+      console.log('Received conversation-ended event:', data);
       setIsEnding(true);
       setConversationStatus('ended');
       setCurrentTopic(data.message);
       setActiveParticipant(null);
       
-      // Generate conversation summary and end call
       setTimeout(() => {
-        handleConversationEnd(false); // false = not manual end
+        handleConversationEnd(false);
       }, 2000);
     });
 
     // Listen for session end
     newSocket.on('session-ended', () => {
-      if (!isEnding) {
+      if (!hasEnded) {
+        console.log('Received session-ended event');
         setIsCallActive(false);
-        handleConversationEnd(isManualEnd);
+        if (!isEnding) {
+          handleConversationEnd(isManualEnd);
+        }
       }
     });
 
@@ -182,8 +193,13 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
 
   const handleConversationEnd = async (manualEnd: boolean = false) => {
-    if (isEnding) return; // Prevent multiple calls
+    if (hasEnded) {
+      console.log('Conversation already ended, skipping...');
+      return;
+    }
     
+    console.log('Handling conversation end, manual:', manualEnd);
+    setHasEnded(true);
     setIsEnding(true);
     setIsCallActive(false);
     
@@ -198,6 +214,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       clearInterval(timerRef.current);
     }
     
+    // Disconnect socket
+    if (socket) {
+      socket.disconnect();
+    }
+    
     // Create conversation summary
     const summary = {
       sessionId,
@@ -210,17 +231,18 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       endType: manualEnd ? 'manual' : 'automatic'
     };
 
-    // Small delay to show ending state, then pass summary to parent
+    console.log('Generated summary:', summary);
+
+    // Pass summary to parent with a small delay
     setTimeout(() => {
       onConversationEnd(summary);
-    }, 1500);
+    }, 1000);
   };
 
   const playAudio = (audioBase64: string, duration: number) => {
-    if (isEnding) return; // Don't play audio if ending
+    if (isEnding || hasEnded) return;
     
     try {
-      // Stop any currently playing audio
       if (currentAudio) {
         currentAudio.pause();
         currentAudio.src = '';
@@ -234,30 +256,38 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        setActiveParticipant(null);
+        if (!isEnding && !hasEnded) {
+          setActiveParticipant(null);
+        }
         setCurrentAudio(null);
       };
 
       audio.onerror = () => {
         console.error('Audio playback error');
         URL.revokeObjectURL(audioUrl);
-        setActiveParticipant(null);
+        if (!isEnding && !hasEnded) {
+          setActiveParticipant(null);
+        }
         setCurrentAudio(null);
       };
       
       audio.play().catch(error => {
         console.error('Audio playback error:', error);
-        setActiveParticipant(null);
+        if (!isEnding && !hasEnded) {
+          setActiveParticipant(null);
+        }
         setCurrentAudio(null);
       });
     } catch (error) {
       console.error('Audio processing error:', error);
-      setActiveParticipant(null);
+      if (!isEnding && !hasEnded) {
+        setActiveParticipant(null);
+      }
     }
   };
 
   const toggleConversation = () => {
-    if (!socket || isEnding) return;
+    if (!socket || isEnding || hasEnded) return;
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -272,16 +302,15 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const handleEndCall = () => {
-    if (isEnding) return;
+    if (isEnding || hasEnded) return;
     
+    console.log('Manual end call triggered');
     setIsManualEnd(true);
     
-    // Emit end session to server
     if (socket) {
       socket.emit('end-session', sessionId);
     }
     
-    // Handle conversation end immediately for manual end
     handleConversationEnd(true);
   };
 
@@ -304,7 +333,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     return 'bg-green-500';
   };
 
-  if (isEnding) {
+  if (isEnding || hasEnded) {
     return (
       <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col items-center justify-center">
         <div className="text-center">
@@ -401,7 +430,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
           <button
             onClick={handleEndCall}
-            disabled={isEnding}
+            disabled={isEnding || hasEnded}
             className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50"
             title="End Discussion"
           >

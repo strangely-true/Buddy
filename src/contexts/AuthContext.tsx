@@ -30,28 +30,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let mounted = true
+
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
+    const getInitialSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Error getting session:', error)
+        }
+        
+        if (mounted) {
+          setSession(session)
+          setUser(session?.user ?? null)
+          setLoading(false)
+        }
+      } catch (error) {
+        console.error('Error in getInitialSession:', error)
+        if (mounted) {
+          setLoading(false)
+        }
+      }
+    }
+
+    getInitialSession()
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
+      console.log('Auth state change:', event, session?.user?.email)
+      
+      if (mounted) {
+        setSession(session)
+        setUser(session?.user ?? null)
+        setLoading(false)
 
-      // Create or update user profile
-      if (session?.user && event === 'SIGNED_IN') {
-        await createOrUpdateUserProfile(session.user)
+        // Create or update user profile on sign in
+        if (session?.user && event === 'SIGNED_IN') {
+          await createOrUpdateUserProfile(session.user)
+        }
+
+        // Handle OAuth callback completion
+        if (event === 'SIGNED_IN' && window.location.pathname === '/auth/callback') {
+          // Redirect to home after successful OAuth
+          window.location.href = '/'
+        }
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const createOrUpdateUserProfile = async (user: User) => {
@@ -76,25 +108,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const signInWithGoogle = async () => {
     try {
+      setLoading(true)
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
         },
       })
-      if (error) throw error
+      
+      if (error) {
+        console.error('OAuth error:', error)
+        throw error
+      }
     } catch (error) {
       console.error('Error signing in with Google:', error)
+      setLoading(false)
       throw error
     }
   }
 
   const signOut = async () => {
     try {
+      setLoading(true)
       const { error } = await supabase.auth.signOut()
       if (error) throw error
+      
+      // Clear any cached data
+      setUser(null)
+      setSession(null)
+      
+      // Redirect to home
+      window.location.href = '/'
     } catch (error) {
       console.error('Error signing out:', error)
+      setLoading(false)
       throw error
     }
   }

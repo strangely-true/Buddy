@@ -9,5 +9,14 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Handle OAuth callback route -->
+    <script>
+      // Simple client-side routing for OAuth callback
+      if (window.location.pathname === '/auth/callback') {
+        // Let the React app handle the OAuth callback
+        console.log('OAuth callback detected');
+      }
+    </script>
   </body>
 </html>

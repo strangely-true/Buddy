@@ -23,6 +23,7 @@ function AppContent() {
   const [sessionId, setSessionId] = useState('')
   const [conversationSummary, setConversationSummary] = useState<any>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string>('')
+  const [isProcessingEnd, setIsProcessingEnd] = useState(false)
 
   // Load API keys from localStorage on mount
   useEffect(() => {
@@ -33,27 +34,65 @@ function AppContent() {
     if (savedElevenLabsKey) setElevenLabsApiKey(savedElevenLabsKey)
   }, [])
 
+  // Handle OAuth callback and prevent infinite redirects
+  useEffect(() => {
+    const handleAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const code = urlParams.get('code')
+      
+      if (code && window.location.pathname === '/auth/callback') {
+        try {
+          // Clear the URL to prevent re-processing
+          window.history.replaceState({}, document.title, '/')
+          
+          // Let Supabase handle the auth callback
+          const { error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error) {
+            console.error('Auth callback error:', error)
+          }
+        } catch (error) {
+          console.error('Error handling auth callback:', error)
+          // Redirect to home on error
+          window.location.href = '/'
+        }
+      }
+    }
+
+    handleAuthCallback()
+  }, [])
+
   const handleSessionStart = (newSessionId: string) => {
     setSessionId(newSessionId)
     setHasSession(true)
     setCurrentView('conference')
+    setIsProcessingEnd(false) // Reset processing state
   }
 
   const handleConversationEnd = async (summary: any) => {
+    // Prevent multiple calls
+    if (isProcessingEnd) {
+      console.log('Already processing conversation end, skipping...')
+      return
+    }
+    
+    setIsProcessingEnd(true)
+    
     try {
-      // Save conversation to database
-      if (user) {
+      console.log('Processing conversation end with summary:', summary)
+      
+      // Save conversation to database if user is authenticated
+      if (user && summary.sessionId) {
         const { data: conversation, error: conversationError } = await supabase
           .from('conversations')
           .insert({
             session_id: summary.sessionId,
             user_id: user.id,
-            title: `AI Discussion - ${new Date().toLocaleDateString()}`,
+            title: summary.topic || `AI Discussion - ${new Date().toLocaleDateString()}`,
             topic_analysis: summary.topic,
             content_type: 'ai_discussion',
             status: 'completed',
-            total_messages: summary.totalMessages,
-            duration_seconds: summary.duration
+            total_messages: summary.totalMessages || 0,
+            duration_seconds: summary.duration || 0
           })
           .select()
           .single()
@@ -65,10 +104,12 @@ function AppContent() {
         }
       }
 
+      // Set summary and navigate
       setConversationSummary(summary)
       setHasSession(false)
       setSessionId('')
       setCurrentView('summary')
+      
     } catch (error) {
       console.error('Error handling conversation end:', error)
       // Still show summary even if save fails
@@ -76,24 +117,35 @@ function AppContent() {
       setHasSession(false)
       setSessionId('')
       setCurrentView('summary')
+    } finally {
+      // Reset processing state after a delay to prevent rapid re-triggering
+      setTimeout(() => {
+        setIsProcessingEnd(false)
+      }, 2000)
     }
   }
 
   const handleEndCall = () => {
-    // This will be called if user manually ends call
-    setHasSession(false)
-    setSessionId('')
-    setCurrentView('dashboard')
+    // This is for emergency fallback only
+    console.log('Emergency end call triggered')
+    if (!isProcessingEnd) {
+      setHasSession(false)
+      setSessionId('')
+      setCurrentView('dashboard')
+      setIsProcessingEnd(false)
+    }
   }
 
   const handleBackToDashboard = () => {
     setCurrentView('dashboard')
     setConversationSummary(null)
     setSelectedConversationId('')
+    setIsProcessingEnd(false)
   }
 
   const handleStartNewConference = () => {
     setCurrentView('upload')
+    setIsProcessingEnd(false)
   }
 
   const handleShowHistory = () => {
@@ -191,7 +243,7 @@ function AppContent() {
             </div>
           )}
 
-          {currentView === 'conference' && hasSession && (
+          {currentView === 'conference' && hasSession && !isProcessingEnd && (
             <div className="container mx-auto px-4 py-4">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
                 <div className="lg:col-span-2">
@@ -233,6 +285,17 @@ function AppContent() {
               conversationId={selectedConversationId}
               onBack={() => setCurrentView('history')}
             />
+          )}
+
+          {/* Processing overlay */}
+          {isProcessingEnd && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-8 text-center">
+                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">Processing...</h3>
+                <p className="text-slate-600">Saving your conversation and generating summary...</p>
+              </div>
+            </div>
           )}
         </>
       ) : (
