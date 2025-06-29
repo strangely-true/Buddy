@@ -5,7 +5,7 @@ export const API_CONFIG = {
   // Use localhost in development, deployed backend in production
   BASE_URL: isDevelopment 
     ? 'http://localhost:3001' 
-    : 'https://your-backend-url.herokuapp.com', // Replace with your actual backend URL
+    : 'web-production-9586d.up.railway.app', // Replace with your actual backend URL
   
   ENDPOINTS: {
     PROCESS_CONTENT: '/api/process-content',
