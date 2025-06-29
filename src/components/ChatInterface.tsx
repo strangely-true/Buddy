@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, MessageSquare, Sparkles, ArrowDown } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 
 interface Message {
@@ -35,6 +35,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -53,21 +54,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const scrollToBottom = () => {
-    if (autoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (autoScroll) {
+      scrollToBottom();
+    }
+  }, [messages, autoScroll]);
 
-  // Handle manual scrolling to disable auto-scroll
+  // Handle manual scrolling to disable auto-scroll and show scroll button
   const handleScroll = () => {
     if (messagesContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 50;
+      const isScrolledUp = scrollTop < scrollHeight - clientHeight - 100;
+      
       setAutoScroll(isAtBottom);
+      setShowScrollButton(isScrolledUp && !isAtBottom);
     }
   };
 
@@ -145,6 +149,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const enableAutoScroll = () => {
     setAutoScroll(true);
+    setShowScrollButton(false);
     scrollToBottom();
   };
 
@@ -159,9 +164,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden relative">
       {/* Modern Header */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4">
+      <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
@@ -172,22 +177,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <p className="text-xs text-slate-300">Join the expert conversation</p>
             </div>
           </div>
-          {!autoScroll && (
-            <button
-              onClick={enableAutoScroll}
-              className="text-xs px-3 py-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
-            >
-              ↓ New messages
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages Container with Scroll */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white"
+        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white scroll-smooth"
         onScroll={handleScroll}
+        style={{ 
+          scrollBehavior: 'smooth',
+          maxHeight: 'calc(100vh - 300px)' // Ensure proper height calculation
+        }}
       >
         {messages.map((message) => (
           <div
@@ -248,8 +249,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Scroll to Bottom Button */}
+      {showScrollButton && (
+        <button
+          onClick={enableAutoScroll}
+          className="absolute right-6 bottom-32 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 z-10 animate-bounce"
+          title="Scroll to bottom"
+        >
+          <ArrowDown className="w-4 h-4" />
+        </button>
+      )}
+
       {/* Modern Input */}
-      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200">
+      <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-t border-slate-200 flex-shrink-0">
         <div className="flex items-end space-x-3">
           <div className="flex-1">
             <textarea
@@ -260,13 +272,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               className="w-full p-4 border-2 border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white shadow-sm"
               rows={2}
               disabled={isProcessing}
+              style={{ minHeight: '60px', maxHeight: '120px' }}
             />
           </div>
           
           <button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isProcessing}
-            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+            className="p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex-shrink-0"
             title="Send Message"
           >
             <Send className="w-5 h-5" />

@@ -23,52 +23,64 @@ app.use(express.json());
 // Store active sessions with enhanced tracking
 const sessions = new Map();
 
-// AI Agents configuration with unique voices and distinct personalities
-const agents = [
-  {
-    id: 'chen',
-    name: 'Dr. Sarah Chen',
-    role: 'Research Analyst',
-    personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
-    expertise: 'research methodology, data analysis, statistical significance, peer review standards',
-    voiceId: 'EXAVITQu4vr4xnSDxMaL',
-    style: 'analytical and precise, focuses on empirical evidence and research rigor',
-    weight: 1.0
-  },
-  {
-    id: 'thompson',
-    name: 'Marcus Thompson',
-    role: 'Strategy Expert',
-    personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
-    expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment',
-    voiceId: 'pNInz6obpgDQGcFmaJgB',
-    style: 'direct and business-focused, evaluates practical applications and market viability',
-    weight: 1.0
-  },
-  {
-    id: 'rodriguez',
-    name: 'Prof. Elena Rodriguez',
-    role: 'Domain Specialist',
-    personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
-    expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections',
-    voiceId: 'XB0fDUnXU5powFXDhCwa',
-    style: 'scholarly and thorough, connects concepts to broader theoretical frameworks',
-    weight: 1.0
-  },
-  {
-    id: 'kim',
-    name: 'Alex Kim',
-    role: 'Innovation Lead',
-    personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
-    expertise: 'emerging technologies, future trends, disruptive innovation, technological implications',
-    voiceId: 'onwK4e9ZLuTAKqWW03F9',
-    style: 'visionary and provocative, explores cutting-edge possibilities and future implications',
-    weight: 1.0
+// Default AI Agents configuration - can be overridden by user preferences
+const getAgents = (customPersonalities = null) => {
+  const defaultAgents = [
+    {
+      id: 'chen',
+      name: 'Dr. Sarah Chen',
+      role: 'Research Analyst',
+      personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
+      expertise: 'research methodology, data analysis, statistical significance, peer review standards',
+      voiceId: 'EXAVITQu4vr4xnSDxMaL',
+      style: 'analytical and precise, focuses on empirical evidence and research rigor',
+      weight: 1.0
+    },
+    {
+      id: 'thompson',
+      name: 'Marcus Thompson',
+      role: 'Strategy Expert',
+      personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
+      expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment',
+      voiceId: 'pNInz6obpgDQGcFmaJgB',
+      style: 'direct and business-focused, evaluates practical applications and market viability',
+      weight: 1.0
+    },
+    {
+      id: 'rodriguez',
+      name: 'Prof. Elena Rodriguez',
+      role: 'Domain Specialist',
+      personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
+      expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections',
+      voiceId: 'XB0fDUnXU5powFXDhCwa',
+      style: 'scholarly and thorough, connects concepts to broader theoretical frameworks',
+      weight: 1.0
+    },
+    {
+      id: 'kim',
+      name: 'Alex Kim',
+      role: 'Innovation Lead',
+      personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
+      expertise: 'emerging technologies, future trends, disruptive innovation, technological implications',
+      voiceId: 'onwK4e9ZLuTAKqWW03F9',
+      style: 'visionary and provocative, explores cutting-edge possibilities and future implications',
+      weight: 1.0
+    }
+  ];
+
+  // Merge with custom personalities if provided
+  if (customPersonalities) {
+    return defaultAgents.map(agent => ({
+      ...agent,
+      ...customPersonalities[agent.id]
+    }));
   }
-];
+
+  return defaultAgents;
+};
 
 // Enhanced agent selection with weighted randomness and conversation tracking
-function selectNextAgent(lastSpeaker, conversationHistory, userInput = null, messageHistory = []) {
+function selectNextAgent(lastSpeaker, conversationHistory, userInput = null, messageHistory = [], agents) {
   const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
   
   if (userInput) {
@@ -134,7 +146,37 @@ function selectNextAgent(lastSpeaker, conversationHistory, userInput = null, mes
 }
 
 // Generate AI response with enhanced personality and focus
-async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null) {
+async function generateAgentResponse(geminiApiKey, agentId, context, conversationHistory, userInput = null, agents) {
+  // If no API key, return a mock response
+  if (!geminiApiKey) {
+    const agent = agents.find(a => a.id === agentId);
+    const mockResponses = {
+      'chen': [
+        "From a research perspective, this raises interesting questions about methodology and data validation.",
+        "I'd like to examine the empirical evidence behind these claims more closely.",
+        "The statistical significance of these findings needs careful consideration."
+      ],
+      'thompson': [
+        "Looking at this from a strategic standpoint, we need to consider the market implications.",
+        "The business case here seems compelling, but implementation challenges are significant.",
+        "ROI analysis would be crucial before moving forward with this approach."
+      ],
+      'rodriguez': [
+        "This connects to several theoretical frameworks we should explore further.",
+        "The academic literature provides valuable context for understanding these concepts.",
+        "From a historical perspective, we've seen similar patterns emerge before."
+      ],
+      'kim': [
+        "This opens up fascinating possibilities for future innovation and disruption.",
+        "Emerging technologies could completely transform how we approach this challenge.",
+        "We should consider the long-term implications and potential paradigm shifts."
+      ]
+    };
+    
+    const responses = mockResponses[agentId] || ["This is an interesting point worth exploring further."];
+    return responses[Math.floor(Math.random() * responses.length)];
+  }
+
   const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
   const agent = agents.find(a => a.id === agentId);
   
@@ -223,17 +265,16 @@ app.post('/api/process-content', async (req, res) => {
   try {
     const { content, type, sessionId, geminiApiKey } = req.body;
     
-    if (!geminiApiKey) {
-      return res.status(400).json({ error: 'Gemini API key required' });
-    }
+    let analysis = "AI Expert Discussion Topic";
+    
+    if (geminiApiKey) {
+      const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
+      let analysisPrompt;
+      let multimodalContent = [];
 
-    let analysisPrompt;
-    let multimodalContent = [];
-
-    if (type === 'multimodal' && content.images && content.images.length > 0) {
-      analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
+      if (type === 'multimodal' && content.images && content.images.length > 0) {
+        analysisPrompt = `Analyze the provided text and images to create a focused expert discussion framework.
 
 Text content: ${content.text}
 
@@ -248,20 +289,20 @@ Create a structured analysis for expert discussion:
 
 The discussion must stay strictly within this topic scope. Experts should not deviate to general or unrelated topics.`;
 
-      multimodalContent.push({ text: analysisPrompt });
+        multimodalContent.push({ text: analysisPrompt });
 
-      content.images.forEach(image => {
-        multimodalContent.push({
-          inlineData: {
-            mimeType: image.mimeType,
-            data: image.data
-          }
+        content.images.forEach(image => {
+          multimodalContent.push({
+            inlineData: {
+              mimeType: image.mimeType,
+              data: image.data
+            }
+          });
         });
-      });
-    } else {
-      const textContent = typeof content === 'object' ? content.text : content;
-      
-      analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
+      } else {
+        const textContent = typeof content === 'object' ? content.text : content;
+        
+        analysisPrompt = `Analyze the following content and create a focused expert discussion framework:
 
 ${textContent}
 
@@ -276,22 +317,35 @@ The experts must stay strictly within this topic scope and not deviate to genera
 
 Keep the analysis concise but comprehensive for a focused 5-15 minute expert discussion.`;
 
-      multimodalContent = [{ text: analysisPrompt }];
+        multimodalContent = [{ text: analysisPrompt }];
+      }
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: multimodalContent,
+      });
+
+      analysis = response.text;
+    } else {
+      // Without API key, create a basic analysis from the content
+      const textContent = typeof content === 'object' ? content.text : content;
+      analysis = `Expert Discussion Topic: ${textContent.substring(0, 200)}...
+
+The AI experts will discuss this topic from their respective perspectives:
+- Research and data analysis viewpoint
+- Strategic business considerations  
+- Academic and theoretical framework
+- Innovation and future implications
+
+This will be a focused discussion staying within the scope of the provided content.`;
     }
-
-    const response = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: multimodalContent,
-    });
-
-    const analysis = response.text;
 
     // Store session data with enhanced tracking
     sessions.set(sessionId, {
       topic: analysis,
       conversationHistory: [],
-      messageHistory: [], // Track structured message history
-      participants: agents,
+      messageHistory: [],
+      participants: getAgents(), // Use default agents, will be updated if custom personalities provided
       isActive: true,
       isPaused: false,
       currentSpeaker: null,
@@ -302,7 +356,8 @@ Keep the analysis concise but comprehensive for a focused 5-15 minute expert dis
       topicBoundaries: analysis,
       lastSpeakers: [],
       startTime: new Date(),
-      isEnding: false // Track if session is ending
+      isEnding: false,
+      hasApiKey: !!geminiApiKey
     });
 
     res.json({ success: true, analysis });
@@ -322,7 +377,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('start-conversation', async (data) => {
-    const { sessionId, geminiApiKey, elevenLabsApiKey } = data;
+    const { sessionId, geminiApiKey, elevenLabsApiKey, customPersonalities } = data;
     const session = sessions.get(sessionId);
     
     if (!session || session.isEnding) {
@@ -331,10 +386,18 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const openingAgent = agents[0]; // Dr. Chen
-      const openingPrompt = `Based on this focused topic analysis: ${session.topic}
+      // Update agents with custom personalities if provided
+      if (customPersonalities) {
+        session.participants = getAgents(customPersonalities);
+      }
 
-As Dr. Sarah Chen, provide a precise opening statement that:
+      const openingAgent = session.participants[0]; // Dr. Chen or custom first agent
+      
+      let message;
+      if (geminiApiKey) {
+        const openingPrompt = `Based on this focused topic analysis: ${session.topic}
+
+As ${openingAgent.name}, provide a precise opening statement that:
 1. Clearly defines the specific topic scope
 2. Sets expectations for a focused expert discussion
 3. Introduces the analytical framework you'll use
@@ -342,13 +405,18 @@ As Dr. Sarah Chen, provide a precise opening statement that:
 
 Stay strictly within the topic boundaries defined in the analysis.`;
 
-      const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
-      const response = await genAI.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: openingPrompt,
-      });
+        const genAI = new GoogleGenAI({ apiKey: geminiApiKey });
+        const response = await genAI.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: openingPrompt,
+        });
 
-      const message = response.text;
+        message = response.text;
+      } else {
+        // Mock opening without API key
+        message = `Welcome everyone. I'm ${openingAgent.name}, and I'll be leading our discussion today. We have an interesting topic to explore from multiple expert perspectives. Let's begin our focused analysis.`;
+      }
+
       session.conversationHistory.push(`${openingAgent.name}: ${message}`);
       session.messageHistory.push({
         agentId: openingAgent.id,
@@ -458,10 +526,8 @@ Stay strictly within the topic boundaries defined in the analysis.`;
         clearTimeout(session.nextTimeout);
       }
       
-      // Emit session ended immediately for manual end
       io.to(sessionId).emit('session-ended');
       
-      // Clean up session after a delay
       setTimeout(() => {
         sessions.delete(sessionId);
       }, 5000);
@@ -505,7 +571,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       session.currentSpeaker, 
       session.conversationHistory, 
       userInput,
-      session.messageHistory
+      session.messageHistory,
+      session.participants
     );
 
     const response = await generateAgentResponse(
@@ -513,7 +580,8 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       nextAgent.id,
       session.topic,
       session.conversationHistory,
-      userInput
+      userInput,
+      session.participants
     );
 
     session.conversationHistory.push(`${nextAgent.name}: ${response}`);

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, File, Image, Type, Loader2, AlertCircle, X } from 'lucide-react';
+import { Upload, File, Image, Type, Loader2, AlertCircle, X, Settings } from 'lucide-react';
 import axios from 'axios';
 
 interface FileUploadProps {
@@ -7,6 +7,12 @@ interface FileUploadProps {
   isApiKeyConfigured: boolean;
   geminiApiKey: string;
   elevenLabsApiKey: string;
+}
+
+interface UploadedFile {
+  file: File;
+  content?: string;
+  base64?: string;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -19,7 +25,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [uploading, setUploading] = useState(false);
   const [textPrompt, setTextPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [showPersonalityConfig, setShowPersonalityConfig] = useState(false);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -45,13 +52,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
     handleFiles(files);
   }, []);
 
-  const handleFiles = (files: File[]) => {
+  const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
-    
-    if (!isApiKeyConfigured) {
-      setError('Please configure your Gemini API key before uploading files.');
-      return;
-    }
     
     // Filter supported file types
     const supportedFiles = files.filter(file => {
@@ -74,7 +76,26 @@ const FileUpload: React.FC<FileUploadProps> = ({
       setError(null);
     }
     
-    setUploadedFiles(prev => [...prev, ...supportedFiles]);
+    // Process files immediately and store content
+    const processedFiles: UploadedFile[] = [];
+    
+    for (const file of supportedFiles) {
+      try {
+        if (file.type.startsWith('image/')) {
+          const base64 = await fileToBase64(file);
+          processedFiles.push({ file, base64 });
+        } else {
+          const content = await readTextFile(file);
+          processedFiles.push({ file, content });
+        }
+      } catch (error) {
+        console.error('Error processing file:', file.name, error);
+        setError(`Failed to process file: ${file.name}`);
+        return;
+      }
+    }
+    
+    setUploadedFiles(prev => [...prev, ...processedFiles]);
   };
 
   const removeFile = (index: number) => {
@@ -109,11 +130,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       return;
     }
     
-    if (!isApiKeyConfigured) {
-      setError('Please configure your Gemini API key before starting a discussion.');
-      return;
-    }
-    
     setUploading(true);
     setError(null);
     
@@ -123,37 +139,21 @@ const FileUpload: React.FC<FileUploadProps> = ({
       let content = textPrompt.trim();
       const images: any[] = [];
       
-      // Process uploaded files
+      // Process uploaded files from temporary storage
       if (uploadedFiles.length > 0) {
         const textContents: string[] = [];
         
-        for (const file of uploadedFiles) {
-          if (file.type.startsWith('image/')) {
+        for (const uploadedFile of uploadedFiles) {
+          if (uploadedFile.base64) {
             // Handle images for multimodal input
-            try {
-              const base64 = await fileToBase64(file);
-              images.push({
-                name: file.name,
-                data: base64,
-                mimeType: file.type
-              });
-            } catch (error) {
-              console.error('Error processing image:', file.name, error);
-              setError(`Failed to process image: ${file.name}`);
-              setUploading(false);
-              return;
-            }
-          } else {
+            images.push({
+              name: uploadedFile.file.name,
+              data: uploadedFile.base64,
+              mimeType: uploadedFile.file.type
+            });
+          } else if (uploadedFile.content) {
             // Handle text files
-            try {
-              const text = await readTextFile(file);
-              textContents.push(`File: ${file.name}\nContent:\n${text}\n`);
-            } catch (error) {
-              console.error('Error reading text file:', file.name, error);
-              setError(`Failed to read file: ${file.name}`);
-              setUploading(false);
-              return;
-            }
+            textContents.push(`File: ${uploadedFile.file.name}\nContent:\n${uploadedFile.content}\n`);
           }
         }
 
@@ -166,6 +166,22 @@ const FileUpload: React.FC<FileUploadProps> = ({
         if (images.length > 0) {
           content += `\n\nUploaded Images: ${images.map(img => img.name).join(', ')}`;
         }
+      }
+
+      // If no Gemini API key, start session with temporary content
+      if (!isApiKeyConfigured) {
+        // Store content temporarily in sessionStorage
+        const tempContent = {
+          text: content,
+          images: images,
+          timestamp: new Date().toISOString()
+        };
+        sessionStorage.setItem(`session_${sessionId}`, JSON.stringify(tempContent));
+        
+        console.log('Starting session without API key - content stored temporarily');
+        setUploading(false);
+        onSessionStart(sessionId);
+        return;
       }
 
       // Prepare content for API
@@ -225,14 +241,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
           className={`relative border-2 border-dashed rounded-t-xl p-8 text-center transition-all duration-300 ${
             dragActive 
               ? 'border-blue-400 bg-blue-50' 
-              : isApiKeyConfigured
-              ? 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'
-              : 'border-slate-200 bg-slate-50'
+              : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'
           }`}
-          onDragEnter={isApiKeyConfigured ? handleDrag : undefined}
-          onDragLeave={isApiKeyConfigured ? handleDrag : undefined}
-          onDragOver={isApiKeyConfigured ? handleDrag : undefined}
-          onDrop={isApiKeyConfigured ? handleDrop : undefined}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
         >
           <input
             type="file"
@@ -240,17 +254,14 @@ const FileUpload: React.FC<FileUploadProps> = ({
             accept=".txt,.md,.csv,.json,.jpg,.jpeg,.png,.webp"
             onChange={handleFileInput}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            disabled={uploading || !isApiKeyConfigured}
+            disabled={uploading}
           />
           
-          <Upload className={`w-8 h-8 mx-auto mb-3 ${isApiKeyConfigured ? 'text-slate-400' : 'text-slate-300'}`} />
-          <p className={`text-sm ${isApiKeyConfigured ? 'text-slate-600' : 'text-slate-400'}`}>
-            {isApiKeyConfigured 
-              ? 'Drop files here or click to upload (optional)'
-              : 'Configure API keys to upload files'
-            }
+          <Upload className="w-8 h-8 mx-auto mb-3 text-slate-400" />
+          <p className="text-sm text-slate-600">
+            Drop files here or click to upload (optional)
           </p>
-          <div className={`flex items-center justify-center space-x-4 text-xs mt-2 ${isApiKeyConfigured ? 'text-slate-500' : 'text-slate-400'}`}>
+          <div className="flex items-center justify-center space-x-4 text-xs mt-2 text-slate-500">
             <div className="flex items-center space-x-1">
               <File className="w-3 h-3" />
               <span>Text Files</span>
@@ -263,6 +274,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <p className="text-xs text-slate-400 mt-1">
             Supported: .txt, .md, .csv, .json, .jpg, .png, .webp
           </p>
+          {!isApiKeyConfigured && (
+            <p className="text-xs text-amber-600 mt-2 font-medium">
+              Files will be processed locally without API key
+            </p>
+          )}
         </div>
 
         {/* Uploaded Files Display */}
@@ -270,16 +286,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
             <h4 className="text-sm font-medium text-slate-700 mb-2">Uploaded Files:</h4>
             <div className="space-y-2">
-              {uploadedFiles.map((file, index) => (
+              {uploadedFiles.map((uploadedFile, index) => (
                 <div key={index} className="flex items-center justify-between bg-white rounded-lg p-2 border border-slate-200">
                   <div className="flex items-center space-x-2">
-                    {file.type.startsWith('image/') ? (
+                    {uploadedFile.file.type.startsWith('image/') ? (
                       <Image className="w-4 h-4 text-green-600" />
                     ) : (
                       <File className="w-4 h-4 text-blue-600" />
                     )}
-                    <span className="text-sm text-slate-700">{file.name}</span>
-                    <span className="text-xs text-slate-500">({(file.size / 1024).toFixed(1)} KB)</span>
+                    <span className="text-sm text-slate-700">{uploadedFile.file.name}</span>
+                    <span className="text-xs text-slate-500">({(uploadedFile.file.size / 1024).toFixed(1)} KB)</span>
+                    <span className="text-xs text-green-600">✓ Processed</span>
                   </div>
                   <button
                     onClick={() => removeFile(index)}
@@ -298,37 +315,50 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <div className="p-6">
           <div className="flex items-start space-x-3">
             <div className="flex-shrink-0 mt-1">
-              <Type className={`w-5 h-5 ${isApiKeyConfigured ? 'text-slate-400' : 'text-slate-300'}`} />
+              <Type className="w-5 h-5 text-slate-400" />
             </div>
             <div className="flex-1 space-y-4">
               <textarea
                 value={textPrompt}
                 onChange={(e) => setTextPrompt(e.target.value)}
-                placeholder={isApiKeyConfigured 
-                  ? "Describe a topic, ask a question, or provide context for your uploaded files. The AI experts will create a focused discussion around your input..."
-                  : "Configure your API keys to start a conversation..."
-                }
+                placeholder="Describe a topic, ask a question, or provide context for your uploaded files. The AI experts will create a focused discussion around your input..."
                 className="w-full h-32 p-4 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
-                disabled={uploading || !isApiKeyConfigured}
+                disabled={uploading}
               />
-              <button
-                onClick={handleSubmit}
-                disabled={(!textPrompt.trim() && uploadedFiles.length === 0) || uploading || !isApiKeyConfigured}
-                className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {uploading ? (
-                  <div className="flex items-center justify-center space-x-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Starting AI Discussion...</span>
-                  </div>
-                ) : (
-                  'Start Focused AI Discussion'
-                )}
-              </button>
+              
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowPersonalityConfig(!showPersonalityConfig)}
+                  className="flex items-center space-x-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Configure AI Personalities (Optional)</span>
+                </button>
+                
+                <button
+                  onClick={handleSubmit}
+                  disabled={(!textPrompt.trim() && uploadedFiles.length === 0) || uploading}
+                  className="bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {uploading ? (
+                    <div className="flex items-center space-x-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Starting AI Discussion...</span>
+                    </div>
+                  ) : (
+                    'Start Focused AI Discussion'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Personality Configuration */}
+      {showPersonalityConfig && (
+        <PersonalityConfig />
+      )}
 
       {/* Tips */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -338,7 +368,124 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <li>• Upload relevant documents or images to provide context</li>
           <li>• Ask targeted questions to guide the expert analysis</li>
           <li>• The discussion will stay focused on your topic - experts won't deviate</li>
+          {!isApiKeyConfigured && (
+            <li>• <strong>Without API key:</strong> Basic discussion mode with default responses</li>
+          )}
         </ul>
+      </div>
+    </div>
+  );
+};
+
+// Personality Configuration Component
+const PersonalityConfig: React.FC = () => {
+  const [personalities, setPersonalities] = useState(() => {
+    const saved = localStorage.getItem('ai_personalities');
+    return saved ? JSON.parse(saved) : {
+      chen: {
+        name: 'Dr. Sarah Chen',
+        role: 'Research Analyst',
+        personality: 'methodical, evidence-based, asks probing questions about data validity and research methodology',
+        expertise: 'research methodology, data analysis, statistical significance, peer review standards'
+      },
+      thompson: {
+        name: 'Marcus Thompson',
+        role: 'Strategy Expert',
+        personality: 'pragmatic, results-oriented, challenges ideas with real-world implementation concerns',
+        expertise: 'business strategy, market dynamics, competitive analysis, ROI assessment'
+      },
+      rodriguez: {
+        name: 'Prof. Elena Rodriguez',
+        role: 'Domain Specialist',
+        personality: 'theoretical, comprehensive, provides deep contextual background and historical perspective',
+        expertise: 'theoretical frameworks, academic literature, conceptual foundations, interdisciplinary connections'
+      },
+      kim: {
+        name: 'Alex Kim',
+        role: 'Innovation Lead',
+        personality: 'forward-thinking, disruptive, challenges conventional thinking with emerging trends',
+        expertise: 'emerging technologies, future trends, disruptive innovation, technological implications'
+      }
+    };
+  });
+
+  const handlePersonalityChange = (agentId: string, field: string, value: string) => {
+    const updated = {
+      ...personalities,
+      [agentId]: {
+        ...personalities[agentId],
+        [field]: value
+      }
+    };
+    setPersonalities(updated);
+    localStorage.setItem('ai_personalities', JSON.stringify(updated));
+  };
+
+  const resetToDefaults = () => {
+    localStorage.removeItem('ai_personalities');
+    window.location.reload();
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-slate-800">AI Expert Personalities</h3>
+        <button
+          onClick={resetToDefaults}
+          className="text-sm text-slate-600 hover:text-slate-800 underline"
+        >
+          Reset to Defaults
+        </button>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {Object.entries(personalities).map(([agentId, agent]) => (
+          <div key={agentId} className="space-y-3 p-4 border border-slate-200 rounded-lg">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+              <input
+                type="text"
+                value={agent.name}
+                onChange={(e) => handlePersonalityChange(agentId, 'name', e.target.value)}
+                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+              <input
+                type="text"
+                value={agent.role}
+                onChange={(e) => handlePersonalityChange(agentId, 'role', e.target.value)}
+                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Personality</label>
+              <textarea
+                value={agent.personality}
+                onChange={(e) => handlePersonalityChange(agentId, 'personality', e.target.value)}
+                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={2}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Expertise</label>
+              <textarea
+                value={agent.expertise}
+                onChange={(e) => handlePersonalityChange(agentId, 'expertise', e.target.value)}
+                className="w-full p-2 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={2}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      <div className="mt-4 text-sm text-slate-600">
+        <p>💡 Customize how each AI expert behaves and responds. Changes are saved automatically.</p>
       </div>
     </div>
   );
