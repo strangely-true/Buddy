@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from 'react';
-import { Upload, File, Image, Type, Loader2, AlertCircle, X, Settings, Sparkles, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Type, Loader2, AlertCircle, Settings, Sparkles, Zap } from 'lucide-react';
 import axios from 'axios';
+import FileUploader from './FileUploader';
 
 interface FileUploadProps {
   onSessionStart: (sessionId: string) => void;
@@ -13,6 +14,9 @@ interface UploadedFile {
   file: File;
   content?: string;
   base64?: string;
+  id: string;
+  status: 'uploading' | 'processing' | 'completed' | 'error';
+  progress: number;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -21,112 +25,34 @@ const FileUpload: React.FC<FileUploadProps> = ({
   geminiApiKey,
   elevenLabsApiKey 
 }) => {
-  const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [textPrompt, setTextPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [showPersonalityConfig, setShowPersonalityConfig] = useState(false);
 
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    const files = Array.from(e.dataTransfer.files);
-    handleFiles(files);
-  }, []);
-
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    handleFiles(files);
-  }, []);
-
-  const handleFiles = async (files: File[]) => {
-    if (files.length === 0) return;
-    
-    // Filter supported file types
-    const supportedFiles = files.filter(file => {
-      const isText = file.type.startsWith('text/') || 
-                    file.name.endsWith('.txt') || 
-                    file.name.endsWith('.md') ||
-                    file.name.endsWith('.csv') ||
-                    file.name.endsWith('.json');
-      const isImage = file.type.startsWith('image/') && 
-                     (file.type.includes('jpeg') || 
-                      file.type.includes('jpg') || 
-                      file.type.includes('png') || 
-                      file.type.includes('webp'));
-      return isText || isImage;
-    });
-
-    if (supportedFiles.length !== files.length) {
-      setError('Some files were skipped. Only text files (.txt, .md, .csv, .json) and images (.jpg, .png, .webp) are supported.');
-    } else {
-      setError(null);
-    }
-    
-    // Process files immediately and store content
-    const processedFiles: UploadedFile[] = [];
-    
-    for (const file of supportedFiles) {
-      try {
-        if (file.type.startsWith('image/')) {
-          const base64 = await fileToBase64(file);
-          processedFiles.push({ file, base64 });
-        } else {
-          const content = await readTextFile(file);
-          processedFiles.push({ file, content });
-        }
-      } catch (error) {
-        console.error('Error processing file:', file.name, error);
-        setError(`Failed to process file: ${file.name}`);
-        return;
-      }
-    }
-    
-    setUploadedFiles(prev => [...prev, ...processedFiles]);
-  };
-
-  const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  const handleFilesChange = (files: UploadedFile[]) => {
+    setUploadedFiles(files);
     setError(null);
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const readTextFile = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsText(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = error => reject(error);
-    });
   };
 
   const handleSubmit = async () => {
     if (!textPrompt.trim() && uploadedFiles.length === 0) {
       setError('Please enter a topic or upload files to start the discussion.');
+      return;
+    }
+    
+    // Check if any files are still processing
+    const processingFiles = uploadedFiles.filter(f => f.status === 'uploading' || f.status === 'processing');
+    if (processingFiles.length > 0) {
+      setError('Please wait for all files to finish processing before starting the discussion.');
+      return;
+    }
+
+    // Check if any files failed
+    const failedFiles = uploadedFiles.filter(f => f.status === 'error');
+    if (failedFiles.length > 0) {
+      setError('Some files failed to process. Please remove them or try uploading again.');
       return;
     }
     
@@ -139,21 +65,23 @@ const FileUpload: React.FC<FileUploadProps> = ({
       let content = textPrompt.trim();
       const images: any[] = [];
       
-      // Process uploaded files from temporary storage
+      // Process uploaded files
       if (uploadedFiles.length > 0) {
         const textContents: string[] = [];
         
         for (const uploadedFile of uploadedFiles) {
-          if (uploadedFile.base64) {
-            // Handle images for multimodal input
-            images.push({
-              name: uploadedFile.file.name,
-              data: uploadedFile.base64,
-              mimeType: uploadedFile.file.type
-            });
-          } else if (uploadedFile.content) {
-            // Handle text files
-            textContents.push(`File: ${uploadedFile.file.name}\nContent:\n${uploadedFile.content}\n`);
+          if (uploadedFile.status === 'completed') {
+            if (uploadedFile.base64) {
+              // Handle images for multimodal input
+              images.push({
+                name: uploadedFile.file.name,
+                data: uploadedFile.base64,
+                mimeType: uploadedFile.file.type
+              });
+            } else if (uploadedFile.content) {
+              // Handle text files
+              textContents.push(`File: ${uploadedFile.file.name}\nContent:\n${uploadedFile.content}\n`);
+            }
           }
         }
 
@@ -222,6 +150,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  const canSubmit = (textPrompt.trim() || uploadedFiles.length > 0) && 
+                   !uploading && 
+                   uploadedFiles.every(f => f.status === 'completed' || f.status === 'error') &&
+                   uploadedFiles.filter(f => f.status === 'completed').length > 0 || textPrompt.trim();
+
   return (
     <div className="space-y-8">
       {error && (
@@ -238,99 +171,33 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
       {/* Main Input Card */}
       <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden shadow-2xl">
-        {/* File Upload Zone */}
-        <div
-          className={`relative border-2 border-dashed rounded-t-3xl p-12 text-center transition-all duration-300 ${
-            dragActive 
-              ? 'border-blue-400/50 bg-blue-500/10' 
-              : 'border-gray-600/50 hover:border-gray-500/50 hover:bg-gray-700/30'
-          }`}
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
-        >
-          <input
-            type="file"
-            multiple
-            accept=".txt,.md,.csv,.json,.jpg,.jpeg,.png,.webp"
-            onChange={handleFileInput}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            disabled={uploading}
-          />
-          
-          <div className="relative">
-            <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-xl font-semibold text-white mb-2">
-              Drop files here or click to upload
+        {/* File Upload Section */}
+        <div className="p-8 border-b border-gray-700/50">
+          <div className="mb-6">
+            <h3 className="text-xl font-semibold text-white mb-2 flex items-center space-x-2">
+              <Sparkles className="w-5 h-5 text-purple-400" />
+              <span>Upload Files</span>
             </h3>
-            <p className="text-gray-300 mb-4">
-              Add documents or images to enhance your AI discussion
-            </p>
-            <div className="flex items-center justify-center space-x-6 text-sm text-gray-400">
-              <div className="flex items-center space-x-2">
-                <File className="w-4 h-4" />
-                <span>Text Files</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Image className="w-4 h-4" />
-                <span>Images</span>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 mt-3">
-              Supported: .txt, .md, .csv, .json, .jpg, .png, .webp
+            <p className="text-gray-300 text-sm">
+              Add documents or images to provide context for your AI discussion
             </p>
             {!isApiKeyConfigured && (
-              <div className="mt-4 inline-flex items-center space-x-2 px-4 py-2 bg-amber-500/20 border border-amber-500/30 rounded-xl">
-                <Zap className="w-4 h-4 text-amber-400" />
-                <span className="text-sm text-amber-300 font-medium">
+              <div className="mt-3 inline-flex items-center space-x-2 px-3 py-1 bg-amber-500/20 border border-amber-500/30 rounded-lg">
+                <Zap className="w-3 h-3 text-amber-400" />
+                <span className="text-xs text-amber-300 font-medium">
                   Files processed locally without API key
                 </span>
               </div>
             )}
           </div>
+          
+          <FileUploader
+            onFilesChange={handleFilesChange}
+            maxFiles={5}
+            maxSize={10 * 1024 * 1024} // 10MB
+            disabled={uploading}
+          />
         </div>
-
-        {/* Uploaded Files Display */}
-        {uploadedFiles.length > 0 && (
-          <div className="px-8 py-6 border-b border-gray-700/50 bg-gray-700/30">
-            <h4 className="text-lg font-semibold text-white mb-4 flex items-center space-x-2">
-              <Sparkles className="w-5 h-5 text-purple-400" />
-              <span>Uploaded Files</span>
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {uploadedFiles.map((uploadedFile, index) => (
-                <div key={index} className="flex items-center justify-between bg-gray-800/50 rounded-xl p-4 border border-gray-600/30">
-                  <div className="flex items-center space-x-3">
-                    {uploadedFile.file.type.startsWith('image/') ? (
-                      <div className="w-8 h-8 bg-gradient-to-r from-green-400 to-emerald-400 rounded-lg flex items-center justify-center">
-                        <Image className="w-4 h-4 text-white" />
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-lg flex items-center justify-center">
-                        <File className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-white font-medium">{uploadedFile.file.name}</span>
-                      <div className="flex items-center space-x-2 text-xs">
-                        <span className="text-gray-400">({(uploadedFile.file.size / 1024).toFixed(1)} KB)</span>
-                        <span className="text-green-400 font-medium">✓ Processed</span>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => removeFile(index)}
-                    className="p-2 text-gray-400 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
-                    disabled={uploading}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Text Input Area */}
         <div className="p-8">
@@ -341,13 +208,18 @@ const FileUpload: React.FC<FileUploadProps> = ({
               </div>
             </div>
             <div className="flex-1 space-y-6">
-              <textarea
-                value={textPrompt}
-                onChange={(e) => setTextPrompt(e.target.value)}
-                placeholder="Describe your topic, ask questions, or provide context for your files. Our AI experts will create a focused discussion around your input..."
-                className="w-full h-40 p-6 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 disabled:bg-gray-800/50 disabled:text-gray-400 text-white placeholder-gray-400 transition-all duration-200"
-                disabled={uploading}
-              />
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-3">
+                  Discussion Topic
+                </label>
+                <textarea
+                  value={textPrompt}
+                  onChange={(e) => setTextPrompt(e.target.value)}
+                  placeholder="Describe your topic, ask questions, or provide context for your files. Our AI experts will create a focused discussion around your input..."
+                  className="w-full h-40 p-6 bg-gray-700/50 border border-gray-600/50 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 disabled:bg-gray-800/50 disabled:text-gray-400 text-white placeholder-gray-400 transition-all duration-200"
+                  disabled={uploading}
+                />
+              </div>
               
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-4 sm:space-y-0 sm:space-x-4">
                 <button
@@ -361,7 +233,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
                 
                 <button
                   onClick={handleSubmit}
-                  disabled={(!textPrompt.trim() && uploadedFiles.length === 0) || uploading}
+                  disabled={!canSubmit}
                   className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white rounded-2xl font-semibold hover:from-blue-600 hover:via-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
                 >
                   {uploading ? (
