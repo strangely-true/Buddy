@@ -8,15 +8,21 @@ import ConferenceRoom from './components/ConferenceRoom'
 import FileUpload from './components/FileUpload'
 import ChatInterface from './components/ChatInterface'
 import ApiKeyModal from './components/ApiKeyModal'
+import ConversationSummary from './components/ConversationSummary'
+import ConversationHistory from './components/ConversationHistory'
+import ConversationDetail from './components/ConversationDetail'
+import { supabase } from './lib/supabase'
 
 function AppContent() {
   const { user, loading } = useAuth()
-  const [currentView, setCurrentView] = useState<'dashboard' | 'upload' | 'conference'>('dashboard')
+  const [currentView, setCurrentView] = useState<'dashboard' | 'upload' | 'conference' | 'summary' | 'history' | 'conversation-detail'>('dashboard')
   const [hasSession, setHasSession] = useState(false)
   const [showApiKeyModal, setShowApiKeyModal] = useState(false)
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState('')
   const [sessionId, setSessionId] = useState('')
+  const [conversationSummary, setConversationSummary] = useState<any>(null)
+  const [selectedConversationId, setSelectedConversationId] = useState<string>('')
 
   // Load API keys from localStorage on mount
   useEffect(() => {
@@ -33,14 +39,70 @@ function AppContent() {
     setCurrentView('conference')
   }
 
+  const handleConversationEnd = async (summary: any) => {
+    try {
+      // Save conversation to database
+      if (user) {
+        const { data: conversation, error: conversationError } = await supabase
+          .from('conversations')
+          .insert({
+            session_id: summary.sessionId,
+            user_id: user.id,
+            title: `AI Discussion - ${new Date().toLocaleDateString()}`,
+            topic_analysis: summary.topic,
+            content_type: 'ai_discussion',
+            status: 'completed',
+            total_messages: summary.totalMessages,
+            duration_seconds: summary.duration
+          })
+          .select()
+          .single()
+
+        if (conversationError) {
+          console.error('Error saving conversation:', conversationError)
+        } else {
+          console.log('Conversation saved successfully:', conversation)
+        }
+      }
+
+      setConversationSummary(summary)
+      setHasSession(false)
+      setSessionId('')
+      setCurrentView('summary')
+    } catch (error) {
+      console.error('Error handling conversation end:', error)
+      // Still show summary even if save fails
+      setConversationSummary(summary)
+      setHasSession(false)
+      setSessionId('')
+      setCurrentView('summary')
+    }
+  }
+
   const handleEndCall = () => {
+    // This will be called if user manually ends call
     setHasSession(false)
     setSessionId('')
     setCurrentView('dashboard')
   }
 
+  const handleBackToDashboard = () => {
+    setCurrentView('dashboard')
+    setConversationSummary(null)
+    setSelectedConversationId('')
+  }
+
   const handleStartNewConference = () => {
     setCurrentView('upload')
+  }
+
+  const handleShowHistory = () => {
+    setCurrentView('history')
+  }
+
+  const handleViewConversation = (conversationId: string) => {
+    setSelectedConversationId(conversationId)
+    setCurrentView('conversation-detail')
   }
 
   const handleResumeConference = (sessionId: string) => {
@@ -83,6 +145,7 @@ function AppContent() {
             <Dashboard 
               onStartNewConference={handleStartNewConference}
               onResumeConference={handleResumeConference}
+              onShowHistory={handleShowHistory}
             />
           )}
 
@@ -137,6 +200,7 @@ function AppContent() {
                     sessionId={sessionId}
                     geminiApiKey={geminiApiKey}
                     elevenLabsApiKey={elevenLabsApiKey}
+                    onConversationEnd={handleConversationEnd}
                   />
                 </div>
                 <div className="lg:col-span-1">
@@ -148,6 +212,27 @@ function AppContent() {
                 </div>
               </div>
             </div>
+          )}
+
+          {currentView === 'summary' && conversationSummary && (
+            <ConversationSummary
+              summary={conversationSummary}
+              onBackToDashboard={handleBackToDashboard}
+            />
+          )}
+
+          {currentView === 'history' && (
+            <ConversationHistory
+              onBackToDashboard={handleBackToDashboard}
+              onViewConversation={handleViewConversation}
+            />
+          )}
+
+          {currentView === 'conversation-detail' && selectedConversationId && (
+            <ConversationDetail
+              conversationId={selectedConversationId}
+              onBack={() => setCurrentView('history')}
+            />
           )}
         </>
       ) : (

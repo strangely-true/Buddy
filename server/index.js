@@ -20,7 +20,7 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-// Store active sessions
+// Store active sessions with enhanced tracking
 const sessions = new Map();
 
 // AI Agents configuration with unique voices and distinct personalities
@@ -33,7 +33,7 @@ const agents = [
     expertise: 'research methodology, data analysis, statistical significance, peer review standards',
     voiceId: 'EXAVITQu4vr4xnSDxMaL',
     style: 'analytical and precise, focuses on empirical evidence and research rigor',
-    weight: 1.0 // Base weight for random selection
+    weight: 1.0
   },
   {
     id: 'thompson',
@@ -67,13 +67,11 @@ const agents = [
   }
 ];
 
-// Enhanced agent selection with weighted randomness
-function selectNextAgent(lastSpeaker, conversationHistory, userInput = null) {
-  // Filter out the last speaker to avoid repetition
+// Enhanced agent selection with weighted randomness and conversation tracking
+function selectNextAgent(lastSpeaker, conversationHistory, userInput = null, messageHistory = []) {
   const availableAgents = agents.filter(agent => agent.id !== lastSpeaker);
   
   if (userInput) {
-    // If user asked a question, select most relevant expert with some randomness
     const relevanceScores = availableAgents.map(agent => {
       let score = agent.weight;
       const input = userInput.toLowerCase();
@@ -91,13 +89,10 @@ function selectNextAgent(lastSpeaker, conversationHistory, userInput = null) {
         score += agent.id === 'kim' ? 2.0 : 0;
       }
       
-      // Add some randomness
       score += Math.random() * 0.5;
-      
       return { agent, score };
     });
     
-    // Sort by score and pick from top 2 with weighted probability
     relevanceScores.sort((a, b) => b.score - a.score);
     const topAgents = relevanceScores.slice(0, 2);
     const totalScore = topAgents.reduce((sum, item) => sum + item.score, 0);
@@ -112,27 +107,18 @@ function selectNextAgent(lastSpeaker, conversationHistory, userInput = null) {
     
     return topAgents[0].agent;
   } else {
-    // Random selection with conversation flow consideration
-    const recentSpeakers = conversationHistory.slice(-4).map(msg => {
-      const speakerMatch = msg.match(/^([^:]+):/);
-      return speakerMatch ? speakerMatch[1] : null;
-    }).filter(Boolean);
+    const recentSpeakers = messageHistory.slice(-4).map(msg => msg.agentId).filter(Boolean);
     
-    // Adjust weights based on recent participation
     const adjustedAgents = availableAgents.map(agent => {
       let weight = agent.weight;
-      const recentCount = recentSpeakers.filter(speaker => speaker.includes(agent.name)).length;
+      const recentCount = recentSpeakers.filter(id => id === agent.id).length;
       
-      // Reduce weight if agent spoke recently
       weight *= Math.max(0.3, 1 - (recentCount * 0.3));
-      
-      // Add randomness
       weight += Math.random() * 0.3;
       
       return { agent, weight };
     });
     
-    // Weighted random selection
     const totalWeight = adjustedAgents.reduce((sum, item) => sum + item.weight, 0);
     let random = Math.random() * totalWeight;
     
@@ -300,20 +286,22 @@ Keep the analysis concise but comprehensive for a focused 5-15 minute expert dis
 
     const analysis = response.text;
 
-    // Store session data with enhanced configuration
+    // Store session data with enhanced tracking
     sessions.set(sessionId, {
       topic: analysis,
       conversationHistory: [],
+      messageHistory: [], // Track structured message history
       participants: agents,
       isActive: true,
       isPaused: false,
       currentSpeaker: null,
       conversationQueue: [],
       totalMessages: 0,
-      maxMessages: 15, // Limited focused discussion
+      maxMessages: 15,
       nextTimeout: null,
       topicBoundaries: analysis,
-      lastSpeakers: [] // Track recent speakers for better randomization
+      lastSpeakers: [],
+      startTime: new Date()
     });
 
     res.json({ success: true, analysis });
@@ -342,7 +330,6 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Generate focused opening statement from Dr. Chen
       const openingAgent = agents[0]; // Dr. Chen
       const openingPrompt = `Based on this focused topic analysis: ${session.topic}
 
@@ -362,15 +349,20 @@ Stay strictly within the topic boundaries defined in the analysis.`;
 
       const message = response.text;
       session.conversationHistory.push(`${openingAgent.name}: ${message}`);
+      session.messageHistory.push({
+        agentId: openingAgent.id,
+        agentName: openingAgent.name,
+        message,
+        timestamp: new Date(),
+        type: 'ai'
+      });
       session.currentSpeaker = openingAgent.id;
       session.totalMessages++;
       session.lastSpeakers = [openingAgent.id];
 
-      // Generate speech
       const audioBase64 = await generateSpeech(message, openingAgent.voiceId, elevenLabsApiKey);
       const audioDuration = estimateAudioDuration(message);
 
-      // Emit to all users in the session
       io.to(sessionId).emit('agent-message', {
         agentId: openingAgent.id,
         agentName: openingAgent.name,
@@ -380,8 +372,7 @@ Stay strictly within the topic boundaries defined in the analysis.`;
         timestamp: new Date()
       });
 
-      // Start the synchronized conversation loop with random timing
-      const randomDelay = 2000 + Math.random() * 2000; // 2-4 seconds
+      const randomDelay = 2000 + Math.random() * 2000;
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + randomDelay);
@@ -402,23 +393,26 @@ Stay strictly within the topic boundaries defined in the analysis.`;
     }
 
     try {
-      // Clear any pending timeouts
       if (session.nextTimeout) {
         clearTimeout(session.nextTimeout);
         session.nextTimeout = null;
       }
 
-      // Add user message to history
       session.conversationHistory.push(`User: ${message}`);
+      session.messageHistory.push({
+        agentId: 'user',
+        agentName: 'User',
+        message,
+        timestamp: new Date(),
+        type: 'user'
+      });
 
-      // Emit user message to all participants
       io.to(sessionId).emit('user-message', {
         message,
         timestamp: new Date()
       });
 
-      // Wait a moment then have an agent respond
-      const responseDelay = 1500 + Math.random() * 1000; // 1.5-2.5 seconds
+      const responseDelay = 1500 + Math.random() * 1000;
       session.nextTimeout = setTimeout(async () => {
         await generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiKey, message);
       }, responseDelay);
@@ -447,7 +441,6 @@ Stay strictly within the topic boundaries defined in the analysis.`;
       session.isPaused = false;
       io.to(sessionId).emit('conversation-resumed');
       
-      // Resume conversation after a random delay
       const resumeDelay = 1500 + Math.random() * 1000;
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, session.geminiApiKey, session.elevenLabsApiKey);
@@ -477,7 +470,6 @@ async function startSynchronizedConversation(sessionId, geminiApiKey, elevenLabs
   const session = sessions.get(sessionId);
   if (!session || !session.isActive || session.isPaused || session.totalMessages >= session.maxMessages) {
     if (session && session.totalMessages >= session.maxMessages) {
-      // End conversation
       io.to(sessionId).emit('conversation-ended', {
         message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'
       });
@@ -500,8 +492,12 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
   }
 
   try {
-    // Select next agent using enhanced random selection
-    const nextAgent = selectNextAgent(session.currentSpeaker, session.conversationHistory, userInput);
+    const nextAgent = selectNextAgent(
+      session.currentSpeaker, 
+      session.conversationHistory, 
+      userInput,
+      session.messageHistory
+    );
 
     const response = await generateAgentResponse(
       geminiApiKey,
@@ -512,17 +508,21 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
     );
 
     session.conversationHistory.push(`${nextAgent.name}: ${response}`);
+    session.messageHistory.push({
+      agentId: nextAgent.id,
+      agentName: nextAgent.name,
+      message: response,
+      timestamp: new Date(),
+      type: 'ai'
+    });
     session.currentSpeaker = nextAgent.id;
     session.totalMessages++;
     
-    // Update last speakers tracking
     session.lastSpeakers = [nextAgent.id, ...(session.lastSpeakers || [])].slice(0, 3);
 
-    // Generate speech
     const audioBase64 = await generateSpeech(response, nextAgent.voiceId, elevenLabsApiKey);
     const audioDuration = estimateAudioDuration(response);
 
-    // Emit to all users in the session
     io.to(sessionId).emit('agent-message', {
       agentId: nextAgent.id,
       agentName: nextAgent.name,
@@ -532,14 +532,12 @@ async function generateNextAgentResponse(sessionId, geminiApiKey, elevenLabsApiK
       timestamp: new Date()
     });
 
-    // Schedule next response with random timing
     if (session.totalMessages < session.maxMessages && session.isActive && !session.isPaused) {
-      const nextDelay = 2000 + Math.random() * 3000; // 2-5 seconds for natural flow
+      const nextDelay = 2000 + Math.random() * 3000;
       session.nextTimeout = setTimeout(() => {
         startSynchronizedConversation(sessionId, geminiApiKey, elevenLabsApiKey);
       }, audioDuration + nextDelay);
     } else if (session.totalMessages >= session.maxMessages) {
-      // End conversation
       session.nextTimeout = setTimeout(() => {
         io.to(sessionId).emit('conversation-ended', {
           message: 'The focused expert discussion has concluded. The specialists have covered the key aspects of your topic.'

@@ -8,13 +8,15 @@ interface ConferenceRoomProps {
   sessionId: string;
   geminiApiKey: string;
   elevenLabsApiKey: string;
+  onConversationEnd: (summary: any) => void;
 }
 
 const ConferenceRoom: React.FC<ConferenceRoomProps> = ({ 
   onEndCall, 
   sessionId, 
   geminiApiKey, 
-  elevenLabsApiKey 
+  elevenLabsApiKey,
+  onConversationEnd
 }) => {
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [activeParticipant, setActiveParticipant] = useState<string | null>(null);
@@ -27,6 +29,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   const [messageCount, setMessageCount] = useState(0);
   const [maxMessages] = useState(15); // Limited focused discussion
   const [discussionTime, setDiscussionTime] = useState(0);
+  const [isEnding, setIsEnding] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const participants = [
@@ -66,7 +69,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
   // Timer for discussion duration
   useEffect(() => {
-    if (conversationStatus === 'active' && !isPaused) {
+    if (conversationStatus === 'active' && !isPaused && !isEnding) {
       timerRef.current = setInterval(() => {
         setDiscussionTime(prev => prev + 1);
       }, 1000);
@@ -82,7 +85,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         clearInterval(timerRef.current);
       }
     };
-  }, [conversationStatus, isPaused]);
+  }, [conversationStatus, isPaused, isEnding]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -106,7 +109,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       setMessageCount(prev => prev + 1);
       
       // Play audio if available, speaker is on, and not paused
-      if (data.audio && isSpeakerOn && !isPaused) {
+      if (data.audio && isSpeakerOn && !isPaused && !isEnding) {
         playAudio(data.audio, data.audioDuration || 5000);
       } else if (data.audioDuration) {
         // Even without audio, simulate the speaking duration
@@ -135,14 +138,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
     // Listen for conversation end
     newSocket.on('conversation-ended', (data) => {
+      setIsEnding(true);
       setConversationStatus('ended');
       setCurrentTopic(data.message);
       setActiveParticipant(null);
+      
+      // Generate conversation summary and end call
+      setTimeout(() => {
+        handleConversationEnd();
+      }, 2000);
     });
 
     // Listen for session end
     newSocket.on('session-ended', () => {
       setIsCallActive(false);
+      handleConversationEnd();
     });
 
     // Start conversation
@@ -163,6 +173,24 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       newSocket.disconnect();
     };
   }, [sessionId, geminiApiKey, elevenLabsApiKey]);
+
+  const handleConversationEnd = async () => {
+    setIsEnding(true);
+    
+    // Create conversation summary
+    const summary = {
+      sessionId,
+      totalMessages: messageCount,
+      duration: discussionTime,
+      topic: currentTopic,
+      participants: participants.map(p => p.name),
+      endedAt: new Date().toISOString(),
+      status: 'completed'
+    };
+
+    // Pass summary to parent component
+    onConversationEnd(summary);
+  };
 
   const playAudio = (audioBase64: string, duration: number) => {
     try {
@@ -203,7 +231,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const toggleConversation = () => {
-    if (!socket) return;
+    if (!socket || isEnding) return;
 
     if (isPaused) {
       socket.emit('resume-conversation', sessionId);
@@ -218,7 +246,11 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
   };
 
   const handleEndCall = () => {
+    if (isEnding) return;
+    
+    setIsEnding(true);
     setIsCallActive(false);
+    
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.src = '';
@@ -230,7 +262,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
       socket.emit('end-session', sessionId);
       socket.disconnect();
     }
-    onEndCall();
+    
+    handleConversationEnd();
   };
 
   const toggleSpeaker = () => {
@@ -251,6 +284,21 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
     if (percentage > 60) return 'bg-yellow-500';
     return 'bg-green-500';
   };
+
+  if (isEnding) {
+    return (
+      <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <MessageCircle className="w-8 h-8 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">Discussion Complete</h2>
+          <p className="text-slate-600 mb-4">Generating summary and saving conversation...</p>
+          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl shadow-xl border border-slate-200 h-full flex flex-col overflow-hidden">
@@ -306,7 +354,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
         <div className="flex items-center justify-center space-x-3 mt-4">
           <button
             onClick={toggleConversation}
-            disabled={!isCallActive || conversationStatus === 'ended'}
+            disabled={!isCallActive || conversationStatus === 'ended' || isEnding}
             className={`p-3 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
               isPaused 
                 ? 'bg-green-500 hover:bg-green-600 text-white' 
@@ -319,7 +367,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
           <button
             onClick={toggleSpeaker}
-            disabled={!isCallActive}
+            disabled={!isCallActive || isEnding}
             className={`p-3 rounded-xl transition-all duration-200 disabled:opacity-50 ${
               isSpeakerOn 
                 ? 'bg-white/20 hover:bg-white/30 text-white' 
@@ -332,7 +380,8 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
           <button
             onClick={handleEndCall}
-            className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200"
+            disabled={isEnding}
+            className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50"
             title="End Discussion"
           >
             <PhoneOff className="w-5 h-5" />
@@ -353,7 +402,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
               }`}
             >
               {/* Speaking Animation */}
-              {activeParticipant === participant.id && !isPaused && (
+              {activeParticipant === participant.id && !isPaused && !isEnding && (
                 <div className="absolute -top-2 -right-2">
                   <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center animate-pulse">
                     <div className="w-3 h-3 bg-white rounded-full"></div>
@@ -382,7 +431,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
 
               {/* Status Indicator */}
               <div className="text-center">
-                {activeParticipant === participant.id && !isPaused ? (
+                {activeParticipant === participant.id && !isPaused && !isEnding ? (
                   <div className="space-y-2">
                     <div className="text-sm text-green-700 font-medium flex items-center justify-center space-x-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -422,14 +471,14 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             </div>
           )}
           
-          {conversationStatus === 'active' && activeParticipant && !isPaused && (
+          {conversationStatus === 'active' && activeParticipant && !isPaused && !isEnding && (
             <div className="inline-flex items-center space-x-2 text-sm text-green-600 bg-green-50 px-4 py-2 rounded-full">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span>{participants.find(p => p.id === activeParticipant)?.name} is analyzing...</span>
             </div>
           )}
           
-          {isPaused && (
+          {isPaused && !isEnding && (
             <div className="inline-flex items-center space-x-2 text-sm text-yellow-600 bg-yellow-50 px-4 py-2 rounded-full">
               <Pause className="w-3 h-3" />
               <span>Discussion paused - Click play to resume</span>
@@ -442,7 +491,7 @@ const ConferenceRoom: React.FC<ConferenceRoomProps> = ({
             </div>
           )}
 
-          {messageCount >= maxMessages && (
+          {messageCount >= maxMessages && !isEnding && (
             <div className="inline-flex items-center space-x-2 text-sm text-red-600 bg-red-50 px-4 py-2 rounded-full mt-2">
               <MessageCircle className="w-3 h-3" />
               <span>Discussion limit reached - Wrapping up</span>
